@@ -40,6 +40,12 @@ type Server struct {
 	requests    []Request
 	version     Version
 	permissions []string
+	failures    map[string]failure
+}
+
+type failure struct {
+	status  int
+	message string
 }
 
 // New starts a fake Immich accepting apiKey. It reports a supported version
@@ -49,6 +55,7 @@ func New(t testing.TB, apiKey string) *Server {
 		apiKey:      apiKey,
 		version:     Version{3, 2, 0},
 		permissions: []string{"all"},
+		failures:    map[string]failure{},
 	}
 	s.mux = http.NewServeMux()
 	s.mux.HandleFunc("GET /api/server/version", s.serverVersion)
@@ -83,6 +90,14 @@ func (s *Server) SetPermissions(permissions ...string) {
 	s.permissions = permissions
 }
 
+// Fail makes every later request to route, e.g. "GET /api/users/me", answer
+// with an Immich error of the given status and message, whatever its API key.
+func (s *Server) Fail(route string, status int, message string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.failures[route] = failure{status, message}
+}
+
 func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 	body, _ := io.ReadAll(r.Body)
 	s.mu.Lock()
@@ -93,7 +108,14 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 		Header: r.Header.Clone(),
 		Body:   body,
 	})
+	f, fail := s.failures[r.Method+" "+r.URL.Path]
 	s.mu.Unlock()
+	if fail {
+		writeJSON(w, f.status, map[string]any{
+			"message": f.message, "error": http.StatusText(f.status), "statusCode": f.status,
+		})
+		return
+	}
 	r.Body = io.NopCloser(bytes.NewReader(body))
 	s.mux.ServeHTTP(w, r)
 }
