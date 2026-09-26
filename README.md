@@ -18,7 +18,7 @@ Uploads go through a Telegram bot and a self-hosted [Telegram Bot API server](ht
 
 - **No catch-up after downtime.** Only Videos uploaded after the current **Watch Start**, the moment the running instance started, are posted. Videos uploaded while immich-tg was down, and everything uploaded before its first start, are never posted. Nothing is stored between runs. The started and stopped messages in the Log Channel are the only record of gaps ([ADR 0002](docs/adr/0002-stateless-service.md)).
 - **Fire-and-forget Posts.** A Post is never edited or deleted once it is published. This holds even if you later edit, trash or delete the Video in Immich, or remove its Share Link.
-- **No retries.** Each New Video is handled once. If something fails, you get a Link-only Post and/or a Problem Report, and that's it. The only thing that is repeated is a call that Telegram rate-limits (HTTP 429). immich-tg waits the time Telegram asks for and makes the call again, with no Problem Report.
+- **No retries.** Each New Video is handled once. If something fails, you get a Link-only Post and/or a Problem Report, and that's it. The only thing that is repeated is a call that Telegram rate-limits (HTTP 429). immich-tg waits the time Telegram asks for, up to 5 minutes, and makes the call again, with no Problem Report. If Telegram asks for a longer wait, the call fails instead.
 
 Other limits:
 
@@ -162,7 +162,7 @@ Edit `.env`. [`.env.example`](.env.example) documents every variable:
 docker compose up -d --build
 ```
 
-This builds the image from this repo and starts one container. The container uses `.env`, restarts automatically (`unless-stopped`), joins the `telegram-bot-api` network and publishes no ports.
+This builds the image from this repo and starts one container. The container uses `.env`, restarts automatically (`unless-stopped`), gets 15 seconds to stop cleanly (`stop_grace_period`), joins the `telegram-bot-api` network and publishes no ports.
 
 Check the logs, which go to stdout as JSON lines:
 
@@ -187,7 +187,7 @@ Now upload a video to Immich. Within about `POLL_INTERVAL` it is logged as `New 
 
 ## Operating
 
-- **Stop:** `docker compose down`, or `docker compose stop`, sends SIGTERM. immich-tg stops polling and either finishes or abandons the Video in progress. An abandoned Video gets no Problem Report; it is logged as `Video abandoned on shutdown`. immich-tg then publishes `🔴 immich-tg stopped` to the Log Channel and exits 0.
+- **Stop:** `docker compose down`, or `docker compose stop`, sends SIGTERM. immich-tg stops polling and either finishes or abandons the Video in progress. A Video is abandoned only when the shutdown itself interrupts it, for example in the middle of its upload or a rate-limit wait. It gets no Post and no Problem Report, and it is logged as `Video abandoned on shutdown`. A Video that fails for any other reason still gets its Link-only Post and Problem Report, even if the failure comes after the stop began, as long as Telegram takes them within 5 seconds. immich-tg then publishes `🔴 immich-tg stopped` to the Log Channel and exits 0.
 - **Crash:** if immich-tg crashes, Docker restarts it and you get a new started message **without** a stopped message before it. That's how you tell crashes from planned stops. Remember that Videos uploaded between the stop and the next start are never posted.
 - **Update:** `git pull && docker compose up -d --build`.
 - **Change configuration:** edit `.env`, then run `docker compose up -d` to recreate the container.
@@ -263,7 +263,7 @@ What each situation produces, and what to check:
 | Waiting longer than `WAIT_TIMEOUT` | Link-only Post: "video not available in Telegram" | Problem Report (`no Transcode in time`) | Immich's transcoding settings ([step 5](#5-configure-immichs-video-transcoding)), Immich's job queue and logs, and whether `WAIT_TIMEOUT` is long enough. |
 | Transcode download fails (an error, a download that breaks off, or Immich sending nothing for 2 minutes) | Link-only Post: "video not available in Telegram" | Problem Report (`Transcode download failed`) | Immich's reachability and logs. |
 | The Transcode's header can't be read | Link-only Post: "video not available in Telegram" | Problem Report (`Transcode header unreadable`) | No `moov` box or video track was found in the first 1 MiB of what Immich served. Check Immich's transcoding settings and logs. |
-| Telegram upload fails (the upload is rejected or breaks off, the Bot API server takes no data for 2 minutes, or it doesn't answer within 1 hour of receiving the whole file) | Link-only Post: "video not available in Telegram" | Problem Report (`upload failed`) | The Bot API server's logs and free disk space. Also check that it runs in `--local` mode, because otherwise anything over 50 MB is rejected. |
+| Telegram upload fails (the upload is rejected or breaks off, the Bot API server takes no data for 2 minutes, it doesn't answer within 1 hour of receiving the whole file, or Telegram rate-limits it for more than 5 minutes) | Link-only Post: "video not available in Telegram" | Problem Report (`upload failed`) | The Bot API server's logs and free disk space. Also check that it runs in `--local` mode, because otherwise anything over 50 MB is rejected. |
 | Share Link creation fails | nothing | Problem Report (`Share Link creation failed`) | The API key's `asset.share` and `sharedLink.create` permissions, and Immich's logs. |
 | The Link-only Post itself fails too | nothing | one Problem Report, of the original kind, noting both failures | Both errors are in the Reason line. |
 | Trashed, archived, locked or deleted before posting | nothing | nothing | This is intended: what you do in Immich takes precedence. |
@@ -271,7 +271,7 @@ What each situation produces, and what to check:
 
 Some things are not reported, by design:
 
-- **Rate limiting.** When Telegram rate-limits a call (429), immich-tg waits the time Telegram asks for and repeats the call; an upload then restarts with a fresh download from Immich. During a burst of uploads, Posts may arrive more slowly, but no Problem Report is made.
+- **Rate limiting.** When Telegram rate-limits a call (429), immich-tg waits the time Telegram asks for and repeats the call; an upload then restarts with a fresh download from Immich. During a burst of uploads, Posts may arrive more slowly, but no Problem Report is made. The exception is a wait of more than 5 minutes: immich-tg doesn't wait, and the call fails. The Problem Report's reason then says `not waited out` and gives the wait Telegram asked for.
 - **Missing thumbnail.** The thumbnail is made from Immich's preview image. If that fails, the Post goes out without a thumbnail, and nothing is sent to the Log Channel.
 
 ### Nothing is posted, and there are no Problem Reports

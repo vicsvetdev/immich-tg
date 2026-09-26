@@ -130,7 +130,7 @@ Uploads go through a bot and a separate, shared, self-hosted Telegram Bot API se
   - send a video Post (streamed multipart)
   - send a text message
 
-  A 429 is handled inside the client by waiting `parameters.retry_after` seconds and repeating the call. This is the only repeat in the system and does not count as a retry. For a video upload, the repeat reopens the Transcode stream from Immich, because the first stream has already been consumed.
+  A 429 is handled inside the client by waiting `parameters.retry_after` seconds and repeating the call. This is the only repeat in the system and does not count as a retry. A `retry_after` over 5 minutes is not waited out: the call fails and takes the normal failure outcome. A wait in progress ends on shutdown. For a video upload, the repeat reopens the Transcode stream from Immich, because the first stream has already been consumed.
 - **MP4 header reader:** a minimal parser that reads the Transcode's display dimensions and rotation from the `moov` box. A hand-rolled parser for the few boxes needed is preferred over a library.
 - **Thumbnail maker:** turns Immich's preview image into a Telegram thumbnail.
 - **Watcher (core loop):** owns the Watch Start, the search window and the in-memory Video list. Each poll:
@@ -284,7 +284,7 @@ Uploads go through a bot and a separate, shared, self-hosted Telegram Bot API se
   5. `getMe` confirms the bot token is valid.
   6. For both the Video Channel and the Log Channel, `getChatMember` for the bot returns `status == "administrator"` with `can_post_messages == true`.
 - **After the checks pass,** the service records the Watch Start and publishes `🟢 immich-tg started, watching uploads from <Watch Start>` to the Log Channel.
-- **On SIGTERM or SIGINT,** it stops polling, finishes or abandons the current Video, publishes `🔴 immich-tg stopped` to the Log Channel and exits 0.
+- **On SIGTERM or SIGINT,** it stops polling, finishes or abandons the current Video, publishes `🔴 immich-tg stopped` to the Log Channel and exits 0. Only failures caused by the shutdown's cancellation go unreported; any other failure still gets its Link-only Post and Problem Report, sent with a 5 s limit before the stopped message.
 
 ### Deployment
 

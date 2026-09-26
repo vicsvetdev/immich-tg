@@ -34,9 +34,16 @@ func failureVideo(a fakeimmich.Asset) fakeimmich.Asset {
 // with a reason mentioning each of reasons, and that it was logged too.
 func (h *harness) assertProblemReport(kind string, reasons ...string) {
 	h.t.Helper()
+	h.assertProblemReportThen(nil, kind, reasons...)
+}
+
+// assertProblemReportThen is assertProblemReport for a Log Channel that got
+// the texts in followedBy after the Problem Report.
+func (h *harness) assertProblemReportThen(followedBy []string, kind string, reasons ...string) {
+	h.t.Helper()
 	texts := h.logChannelTexts()
-	if len(texts) != 1 {
-		h.t.Fatalf("Log Channel got %q, want one Problem Report", texts)
+	if len(texts) != 1+len(followedBy) || !slices.Equal(texts[1:], followedBy) {
+		h.t.Fatalf("Log Channel got %q, want one Problem Report followed by %q", texts, followedBy)
 	}
 	wantStart := "⚠️ Problem: " + kind + "\n" +
 		"📅 26 Sep 2026, 19:04\n" +
@@ -81,6 +88,7 @@ func (h *harness) sendVideoCalls() []faketelegram.Call {
 }
 
 func TestOversizedVideoGetsLinkOnlyPostWithoutUpload(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	h.immich.AddAsset(failureVideo(fakeimmich.Asset{ContentLength: 2_000_000_001}))
 
@@ -98,6 +106,7 @@ func TestOversizedVideoGetsLinkOnlyPostWithoutUpload(t *testing.T) {
 }
 
 func TestTranscodeOfExactlyTheLimitIsUploaded(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	// Declares exactly the limit, but the fake then cuts the download short.
 	h.immich.AddAsset(failureVideo(fakeimmich.Asset{ContentLength: 2_000_000_000}))
@@ -113,7 +122,9 @@ func TestTranscodeOfExactlyTheLimitIsUploaded(t *testing.T) {
 }
 
 func TestMissingContentLength(t *testing.T) {
+	t.Parallel()
 	t.Run("the upload goes ahead", func(t *testing.T) {
+		t.Parallel()
 		h := newHarness(t)
 		h.immich.AddAsset(failureVideo(fakeimmich.Asset{NoContentLength: true}))
 
@@ -130,6 +141,7 @@ func TestMissingContentLength(t *testing.T) {
 		}
 	})
 	t.Run("a Telegram rejection is an upload failure", func(t *testing.T) {
+		t.Parallel()
 		h := newHarness(t)
 		h.immich.AddAsset(failureVideo(fakeimmich.Asset{NoContentLength: true}))
 		h.telegram.Enqueue("sendVideo", faketelegram.BareStatus(http.StatusRequestEntityTooLarge))
@@ -143,6 +155,7 @@ func TestMissingContentLength(t *testing.T) {
 }
 
 func TestUnobtainableTranscodeGetsLinkOnlyPost(t *testing.T) {
+	t.Parallel()
 	// An MP4 whose first MiB has no moov box.
 	noMoov := bytes.Join([][]byte{box("ftyp", []byte("isom\x00\x00\x02\x00isomavc1")), box("mdat", randomBytes(1000))}, nil)
 	// An MP4 whose moov box starts only after the first MiB.
@@ -200,6 +213,7 @@ func TestUnobtainableTranscodeGetsLinkOnlyPost(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			h := newHarness(t)
 			h.immich.AddAsset(failureVideo(tt.asset))
 			if tt.fail {
@@ -218,6 +232,7 @@ func TestUnobtainableTranscodeGetsLinkOnlyPost(t *testing.T) {
 }
 
 func TestUploadFailureGetsLinkOnlyPost(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name   string
 		reply  faketelegram.Reply
@@ -233,6 +248,7 @@ func TestUploadFailureGetsLinkOnlyPost(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			h := newHarness(t)
 			h.immich.AddAsset(failureVideo(fakeimmich.Asset{}))
 			h.telegram.Enqueue("sendVideo", tt.reply)
@@ -255,6 +271,7 @@ func TestUploadFailureGetsLinkOnlyPost(t *testing.T) {
 }
 
 func TestShareLinkFailureGetsProblemReportOnly(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	h.immich.FailShareLinks(http.StatusForbidden)
 	h.immich.AddAsset(failureVideo(fakeimmich.Asset{}))
@@ -272,6 +289,7 @@ func TestShareLinkFailureGetsProblemReportOnly(t *testing.T) {
 }
 
 func TestFailedLinkOnlyFallbackGetsOneProblemReportNotingBoth(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		asset   fakeimmich.Asset
@@ -294,6 +312,7 @@ func TestFailedLinkOnlyFallbackGetsOneProblemReportNotingBoth(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			h := newHarness(t)
 			h.start()
 			h.poll() // after the started message, so the error hits the Link-only Post
@@ -312,6 +331,7 @@ func TestFailedLinkOnlyFallbackGetsOneProblemReportNotingBoth(t *testing.T) {
 }
 
 func TestTelegramUnreachableForTheProblemReportToo(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	h.start()
 	h.poll()
@@ -352,6 +372,7 @@ func TestTelegramUnreachableForTheProblemReportToo(t *testing.T) {
 }
 
 func TestRateLimitedUploadIsWaitedOutAndRepeatedWithAFreshStream(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	transcode := append(bytes.Clone(fakeimmich.LandscapeMP4), box("free", randomBytes(3<<20))...)
 	h.immich.AddAsset(failureVideo(fakeimmich.Asset{Transcode: transcode, Duration: 83 * time.Second}))
@@ -397,6 +418,7 @@ func TestRateLimitedUploadIsWaitedOutAndRepeatedWithAFreshStream(t *testing.T) {
 }
 
 func TestRateLimitedMessagesAreWaitedOut(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	h.telegram.Enqueue("sendMessage", faketelegram.RateLimited(2)) // the started message
 	h.start()
@@ -421,8 +443,53 @@ func TestRateLimitedMessagesAreWaitedOut(t *testing.T) {
 	}
 }
 
+func TestRateLimitWaitsAreCapped(t *testing.T) {
+	t.Parallel()
+	t.Run("a wait of 5 minutes is waited out", func(t *testing.T) {
+		t.Parallel()
+		h := newHarness(t)
+		h.immich.AddAsset(failureVideo(fakeimmich.Asset{}))
+		h.telegram.Enqueue("sendVideo", faketelegram.RateLimited(300))
+
+		h.start()
+		h.poll()
+
+		if posts := h.telegram.Posts(videoChannel); len(posts) != 1 || posts[0].Method != "sendVideo" {
+			t.Fatalf("got Posts %+v, want the repeated upload", posts)
+		}
+		if waits := h.clock.Waits(); !slices.Equal(waits, []time.Duration{5 * time.Minute}) {
+			t.Errorf("waited %v, want the 5m of retry_after", waits)
+		}
+		if texts := h.logChannelTexts(); len(texts) != 0 {
+			t.Errorf("Log Channel got %q, want no Problem Report", texts)
+		}
+	})
+	t.Run("a longer wait is an upload failure", func(t *testing.T) {
+		t.Parallel()
+		h := newHarness(t)
+		h.immich.AddAsset(failureVideo(fakeimmich.Asset{}))
+		h.telegram.Enqueue("sendVideo", faketelegram.RateLimited(301))
+
+		h.start()
+		h.poll()
+
+		assertPosts(t, h.posts(), textPost("26 Sep 2026, 19:04", 1)+notAvailableNote)
+		h.assertProblemReport("upload failed",
+			"telegram sendVideo: 429 Too Many Requests: retry after 301",
+			"not waited out: the rate-limit wait of 5m1s is over the 5m0s limit")
+		if n := len(h.sendVideoCalls()); n != 1 {
+			t.Errorf("got %d sendVideo calls, want 1", n)
+		}
+		if waits := h.clock.Waits(); len(waits) != 0 {
+			t.Errorf("waited %v, want no waits", waits)
+		}
+	})
+}
+
 func TestStalledUploadIsAbandoned(t *testing.T) {
+	t.Parallel()
 	t.Run("Immich stalls", func(t *testing.T) {
+		t.Parallel()
 		h := newHarness(t)
 		h.immich.AddAsset(failureVideo(fakeimmich.Asset{Stall: true}))
 
@@ -433,6 +500,7 @@ func TestStalledUploadIsAbandoned(t *testing.T) {
 		h.assertProblemReport("Transcode download failed", "could not download the Transcode: stalled: no data for 2m0s")
 	})
 	t.Run("the Bot API server stalls", func(t *testing.T) {
+		t.Parallel()
 		h := newHarness(t)
 		// Large enough to fill the connection's buffers.
 		transcode := append(bytes.Clone(fakeimmich.LandscapeMP4), box("free", randomBytes(32<<20))...)
@@ -448,6 +516,7 @@ func TestStalledUploadIsAbandoned(t *testing.T) {
 }
 
 func TestShutdownDuringUploadSendsNoProblemReport(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	h.start()
 	h.poll()

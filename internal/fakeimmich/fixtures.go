@@ -45,8 +45,10 @@ var (
 )
 
 var (
-	// PreviewJPEG is a preview the size Immich makes them by default, 1440×810.
-	PreviewJPEG = SplitJPEG(1440, 810)
+	// PreviewJPEG is a tiny 32×18 preview, cheap to turn into a thumbnail.
+	// Immich makes 1440×810 previews by default: tests of the scaling use
+	// SplitJPEG for one that size.
+	PreviewJPEG = SplitJPEG(32, 18)
 
 	// PreviewWebP is a 1440×810 WebP preview, as Immich makes them when
 	// configured to. It was made with ffmpeg 9:
@@ -61,14 +63,16 @@ var (
 // SplitJPEG returns a split preview of the given size.
 func SplitJPEG(width, height int) []byte {
 	img := image.NewRGBA(image.Rect(0, 0, width, height))
-	for y := range height {
-		for x := range width {
-			c := PreviewLeft
-			if x >= width/2 {
-				c = PreviewRight
-			}
-			img.SetRGBA(x, y, c)
+	for x := range width {
+		c := PreviewLeft
+		if x >= width/2 {
+			c = PreviewRight
 		}
+		img.SetRGBA(x, 0, c)
+	}
+	// Every row is the same as the first.
+	for y := 1; y < height; y++ {
+		copy(img.Pix[y*img.Stride:], img.Pix[:img.Stride])
 	}
 	var buf bytes.Buffer
 	if err := jpeg.Encode(&buf, img, &jpeg.Options{Quality: 90}); err != nil {

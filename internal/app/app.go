@@ -16,6 +16,7 @@ import (
 	"immich-tg/internal/config"
 	"immich-tg/internal/immich"
 	"immich-tg/internal/publisher"
+	"immich-tg/internal/shutdown"
 	"immich-tg/internal/telegram"
 	"immich-tg/internal/watcher"
 )
@@ -31,10 +32,6 @@ const watchStartLayout = "02 Jan 2006, 15:04:05 MST"
 
 // stoppedMessage is published to the Log Channel on a clean shutdown.
 const stoppedMessage = "🔴 immich-tg stopped"
-
-// stoppedTimeout bounds publishing the stopped message, well within the 10s
-// Docker waits after SIGTERM before killing the process.
-const stoppedTimeout = 5 * time.Second
 
 // PollTrigger starts polls. The service receives one channel per poll to run
 // and closes it once that poll has finished, so the sender can wait for it.
@@ -111,7 +108,7 @@ func Main(ctx context.Context, getenv func(string) string, opts Options) int {
 	for {
 		select {
 		case <-ctx.Done():
-			return shutdown(ctx, log, tg, cfg.LogChannelID)
+			return stop(ctx, log, tg, cfg.LogChannelID)
 		case done := <-polls:
 			w.Poll(ctx)
 			close(done)
@@ -119,12 +116,12 @@ func Main(ctx context.Context, getenv func(string) string, opts Options) int {
 	}
 }
 
-// shutdown publishes the stopped message to the Log Channel and returns the
-// exit code. ctx is already cancelled by the shutdown signal, so the message
-// goes out on a context of its own.
-func shutdown(ctx context.Context, log *slog.Logger, tg *telegram.Client, logChannelID string) int {
+// stop publishes the stopped message to the Log Channel and returns the exit
+// code. ctx is already cancelled by the shutdown signal, so the message goes
+// out on a context of its own, bounded by the shutdown grace.
+func stop(ctx context.Context, log *slog.Logger, tg *telegram.Client, logChannelID string) int {
 	log.Info("stopping")
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), stoppedTimeout)
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), shutdown.Grace)
 	defer cancel()
 	if err := tg.SendMessage(ctx, telegram.Message{ChatID: logChannelID, Text: stoppedMessage}); err != nil {
 		log.Error("could not publish the stopped message to the Log Channel", "error", err)

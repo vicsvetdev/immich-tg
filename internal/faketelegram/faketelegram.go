@@ -55,7 +55,23 @@ type Reply struct {
 	Status int
 	Body   string
 
-	disconnect, stall bool
+	disconnect, stall, success bool
+	// release, if set, holds the reply back until it is closed.
+	release <-chan struct{}
+}
+
+// After holds r back until release is closed: the server reads and records
+// the call at once, but answers it only then, or never if the client goes
+// away first.
+func (r Reply) After(release <-chan struct{}) Reply {
+	r.release = release
+	return r
+}
+
+// Success is the usual successful answer, for queueing one held back with
+// After.
+func Success() Reply {
+	return Reply{success: true}
 }
 
 // Disconnect is no response at all: the server reads the request, then closes
@@ -107,7 +123,8 @@ type Server struct {
 	members   map[string]map[string]any
 	messageID int
 
-	// closed is closed when the test ends, releasing stalled calls.
+	// closed is closed when the test ends, releasing stalled calls and held
+	// replies.
 	closed chan struct{}
 }
 
@@ -182,7 +199,12 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 		s.replies[method] = q[1:]
 		s.calls = append(s.calls, Call{Method: method, Token: token})
 		s.mu.Unlock()
-		<-s.closed
+		select {
+		case <-r.Context().Done():
+		case <-s.closed:
+		}
+		// The body is unread.
+		dropConnection(w)
 		return
 	}
 	s.mu.Unlock()
@@ -202,6 +224,9 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 		reply = JSONError(http.StatusBadRequest, "Bad Request: "+parseErr.Error())
 	case len(s.replies[method]) > 0:
 		reply, s.replies[method] = s.replies[method][0], s.replies[method][1:]
+		if reply.success {
+			reply = s.success(call).After(reply.release)
+		}
 	default:
 		reply = s.success(call)
 	}
@@ -209,14 +234,35 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 	s.calls = append(s.calls, call)
 	s.mu.Unlock()
 
-	if reply.disconnect {
-		conn, _, err := http.NewResponseController(w).Hijack()
-		if err == nil {
-			conn.Close()
+	if reply.release != nil {
+		select {
+		case <-reply.release:
+		case <-r.Context().Done():
+			return
+		case <-s.closed:
+			return
 		}
+	}
+
+	if reply.disconnect {
+		dropConnection(w)
 		return
 	}
 	writeReply(w, reply)
+	if parseErr != nil {
+		// The body was not read to its end, often because the client gave
+		// up.
+		dropConnection(w)
+	}
+}
+
+// dropConnection closes the connection of the call being answered. For a call
+// whose body is unread, this also spares the server's half-second wait before
+// closing it.
+func dropConnection(w http.ResponseWriter) {
+	if conn, _, err := http.NewResponseController(w).Hijack(); err == nil {
+		conn.Close()
+	}
 }
 
 // success builds a plausible successful result for call. s.mu must be held.

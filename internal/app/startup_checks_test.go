@@ -18,6 +18,7 @@ const (
 )
 
 func TestStartupChecksRunInOrderBeforeTheStartedMessage(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 
 	h.start()
@@ -51,6 +52,7 @@ func TestStartupChecksRunInOrderBeforeTheStartedMessage(t *testing.T) {
 }
 
 func TestSupportedImmichVersions(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		version   fakeimmich.Version
 		supported bool
@@ -66,6 +68,7 @@ func TestSupportedImmichVersions(t *testing.T) {
 		v := tt.version
 		name := "v" + strconv.Itoa(v.Major) + "." + strconv.Itoa(v.Minor) + "." + strconv.Itoa(v.Patch)
 		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 			h := newHarness(t)
 			h.immich.SetVersion(v)
 
@@ -83,6 +86,7 @@ func TestSupportedImmichVersions(t *testing.T) {
 }
 
 func TestAPIKeyPermissions(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name        string
 		permissions []string
@@ -97,6 +101,7 @@ func TestAPIKeyPermissions(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			h := newHarness(t)
 			h.immich.SetPermissions(tt.permissions...)
 
@@ -116,6 +121,7 @@ func TestAPIKeyPermissions(t *testing.T) {
 // TestFailedStartupChecks covers a failing case of each check. The check
 // fails with its message, and none after it runs.
 func TestFailedStartupChecks(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name  string
 		setup func(h *harness)
@@ -223,6 +229,7 @@ func TestFailedStartupChecks(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			h := newHarness(t)
 			tt.setup(h)
 

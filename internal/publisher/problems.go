@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"immich-tg/internal/immich"
+	"immich-tg/internal/shutdown"
 	"immich-tg/internal/telegram"
 )
 
@@ -50,30 +51,41 @@ type problem struct {
 
 // TimedOut handles a Video that stayed Waiting longer than waitTimeout: it
 // publishes a Link-only Post and a Problem Report. It is never repeated:
-// whatever the outcome, the Video has been handled.
+// whatever the outcome, the Video has been handled. A timeout is a genuine
+// failure, so its outcome is published even if shutdown begins meanwhile.
 func (p *Publisher) TimedOut(ctx context.Context, v immich.Asset, waitTimeout time.Duration) {
+	ctx, cancel := shutdown.Outlive(ctx)
+	defer cancel()
 	prob := problem{kindTimeout, fmt.Errorf("Immich produced no Transcode within WAIT_TIMEOUT (%s)", waitTimeout)}
 	shareLink, err := p.shareLink(ctx, v)
 	if err != nil {
 		prob.err = fmt.Errorf("%w; no Link-only Post, could not create the Share Link: %w", prob.err, err)
 	}
-	p.fail(ctx, v, shareLink, prob)
+	p.publishOutcome(ctx, v, shareLink, prob)
 }
 
-// fail handles a Video that could not be posted as intended: it publishes a
-// Link-only Post, given a Share Link and a kind of problem that gets one, then
-// a Problem Report, which notes a failed Link-only Post too. Once the service
-// is shutting down, the failure is only logged: the Video is abandoned, and
-// the stopped message tells the operator why.
+// fail handles a Video that could not be posted as intended. A failure caused
+// by the shutdown abandons the Video: it is only logged, and the stopped
+// message tells the operator why. Any other failure gets its outcome, even
+// once shutdown has begun, within the shutdown grace.
 func (p *Publisher) fail(ctx context.Context, v immich.Asset, shareLink string, prob problem) {
+	if shutdown.Caused(ctx, prob.err) {
+		p.log.Info("Video abandoned on shutdown", "asset_id", v.ID, "error", prob.err)
+		return
+	}
+	ctx, cancel := shutdown.Outlive(ctx)
+	defer cancel()
+	p.publishOutcome(ctx, v, shareLink, prob)
+}
+
+// publishOutcome publishes a failure's outcome: a Link-only Post, given a
+// Share Link and a kind of problem that gets one, then a Problem Report, which
+// notes a failed Link-only Post too.
+func (p *Publisher) publishOutcome(ctx context.Context, v immich.Asset, shareLink string, prob problem) {
 	if note := prob.kind.note(); shareLink != "" && note != "" {
 		if err := p.publishLinkOnly(ctx, v, shareLink, note); err != nil {
 			prob.err = fmt.Errorf("%w; the Link-only Post failed too: %w", prob.err, err)
 		}
-	}
-	if ctx.Err() != nil {
-		p.log.Info("Video abandoned on shutdown", "asset_id", v.ID, "error", prob.err)
-		return
 	}
 	p.report(ctx, v, prob)
 }

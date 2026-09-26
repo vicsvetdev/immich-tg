@@ -89,6 +89,7 @@ func mustJSON(t *testing.T, s string) map[string]any {
 }
 
 func TestReadyVideoIsPostedWithCaptionAndShareLink(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	h.immich.AddAsset(fakeimmich.Asset{
 		ID:            "video-1",
@@ -112,6 +113,7 @@ func TestReadyVideoIsPostedWithCaptionAndShareLink(t *testing.T) {
 }
 
 func TestWaitingVideoIsPostedOnceReady(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	h.start()
 	h.poll()
@@ -140,6 +142,7 @@ func TestWaitingVideoIsPostedOnceReady(t *testing.T) {
 }
 
 func TestVideosFromBeforeWatchStartAreExcluded(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	// A Watch Start with sub-millisecond precision: the search starts at the
 	// millisecond before it, so the service must exclude earlier uploads itself.
@@ -168,6 +171,7 @@ func TestVideosFromBeforeWatchStartAreExcluded(t *testing.T) {
 }
 
 func TestPartnerVideosAreIgnored(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	h.immich.AddAsset(fakeimmich.Asset{ID: "partner", OwnerID: partnerID, CreatedAt: after(time.Minute), Transcoded: true})
 
@@ -186,6 +190,7 @@ func TestPartnerVideosAreIgnored(t *testing.T) {
 }
 
 func TestOnlyVideosOnTheTimelineArePosted(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	for _, a := range []fakeimmich.Asset{
 		{ID: "motion-photo-clip", Visibility: "hidden"},
@@ -207,6 +212,7 @@ func TestOnlyVideosOnTheTimelineArePosted(t *testing.T) {
 }
 
 func TestSearchRequests(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	// candidates and ready are the two searches of a poll from windowStart.
 	candidates := func(windowStart string) map[string]any {
@@ -266,6 +272,7 @@ func TestSearchRequests(t *testing.T) {
 }
 
 func TestSearchFollowsPages(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	h.immich.SetPageSize(2)
 	var want []string
@@ -295,6 +302,7 @@ func TestSearchFollowsPages(t *testing.T) {
 }
 
 func TestRecordingDateIsFormattedWithoutTimeZoneConversion(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		localDateTime time.Time
 		want          string
@@ -305,6 +313,7 @@ func TestRecordingDateIsFormattedWithoutTimeZoneConversion(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.want, func(t *testing.T) {
+			t.Parallel()
 			h := newHarness(t)
 			h.immich.AddAsset(fakeimmich.Asset{ID: "video", CreatedAt: after(time.Minute), LocalDateTime: tt.localDateTime, Transcoded: true})
 
@@ -317,6 +326,7 @@ func TestRecordingDateIsFormattedWithoutTimeZoneConversion(t *testing.T) {
 }
 
 func TestBurstIsPostedInUploadOrder(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	// Immich returns them by Recording Date, newest first: second, third, first.
 	h.immich.AddAsset(fakeimmich.Asset{ID: "third", CreatedAt: after(3 * time.Second), LocalDateTime: time.Date(2026, 9, 10, 0, 0, 0, 0, time.UTC), Transcoded: true})
@@ -341,6 +351,7 @@ func TestBurstIsPostedInUploadOrder(t *testing.T) {
 }
 
 func TestVideoInOverlappingPollsIsPostedOnce(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	h.immich.AddAsset(fakeimmich.Asset{ID: "video", CreatedAt: after(time.Minute), Transcoded: true})
 
@@ -362,6 +373,7 @@ func TestVideoInOverlappingPollsIsPostedOnce(t *testing.T) {
 }
 
 func TestVideoIsNotRetriedAfterShareLinkFailure(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	h.immich.FailShareLinks(http.StatusForbidden)
 	h.immich.AddAsset(fakeimmich.Asset{ID: "video", CreatedAt: after(time.Minute), Transcoded: true})
@@ -378,6 +390,7 @@ func TestVideoIsNotRetriedAfterShareLinkFailure(t *testing.T) {
 }
 
 func TestVideoIsNotRetriedAfterPostFailure(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 
 	h.start()
@@ -395,8 +408,10 @@ func TestVideoIsNotRetriedAfterPostFailure(t *testing.T) {
 }
 
 func TestTrackedVideosStayBoundedOverManyPolls(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
-	const polls = 200
+	// Well past the steady state of about 12 tracked Videos.
+	const polls = 40
 
 	h.start()
 	h.poll()
@@ -424,6 +439,7 @@ func TestTrackedVideosStayBoundedOverManyPolls(t *testing.T) {
 }
 
 func TestPollsRunEveryPollInterval(t *testing.T) {
+	// Not parallel: it measures wall-clock time between polls.
 	h := newHarness(t)
 	const interval = 100 * time.Millisecond
 	h.env["POLL_INTERVAL"] = interval.String()

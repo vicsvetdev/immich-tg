@@ -22,6 +22,9 @@ const (
 	// callTimeout bounds a call without an upload, so that a hung Bot API
 	// server fails the call instead of blocking the service.
 	callTimeout = 30 * time.Second
+	// maxRetryAfter is the longest rate-limit wait that is waited out. A 429
+	// asking for longer fails the call, so that it cannot block the service.
+	maxRetryAfter = 5 * time.Minute
 )
 
 // Client calls the Bot API for one bot.
@@ -98,7 +101,8 @@ func rateLimited(err error) (retryAfter time.Duration, ok bool) {
 
 // waitingOutRateLimits runs attempt and, each time it is rate limited, waits
 // as long as the 429 asks and runs it again. This is the only repeat in the
-// service. It stops waiting when ctx is done.
+// service. A wait over maxRetryAfter is not waited out: the call fails. It
+// stops waiting when ctx is done.
 func (c *Client) waitingOutRateLimits(ctx context.Context, attempt func() error) error {
 	for {
 		err := attempt()
@@ -106,9 +110,12 @@ func (c *Client) waitingOutRateLimits(ctx context.Context, attempt func() error)
 		if !ok {
 			return err
 		}
+		if retryAfter > maxRetryAfter {
+			return fmt.Errorf("%w; not waited out: the rate-limit wait of %s is over the %s limit", err, retryAfter, maxRetryAfter)
+		}
 		select {
 		case <-ctx.Done():
-			return fmt.Errorf("%w; stopped waiting for the rate limit: %w", err, ctx.Err())
+			return fmt.Errorf("%w; stopped waiting for the rate limit: %w", err, context.Cause(ctx))
 		case <-c.clock.After(retryAfter):
 		}
 	}

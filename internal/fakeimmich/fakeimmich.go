@@ -42,8 +42,10 @@ type Server struct {
 	permissions []string
 	lib         library
 	failures    map[string]failure
+	hangs       map[string]bool
 
-	// closed is closed when the test ends, releasing stalled downloads.
+	// closed is closed when the test ends, releasing stalled downloads and
+	// hung requests.
 	closed chan struct{}
 }
 
@@ -60,6 +62,7 @@ func New(t testing.TB, apiKey string) *Server {
 		version:     Version{3, 2, 0},
 		permissions: []string{"all"},
 		failures:    map[string]failure{},
+		hangs:       map[string]bool{},
 		closed:      make(chan struct{}),
 	}
 	s.mux = http.NewServeMux()
@@ -105,6 +108,14 @@ func (s *Server) Fail(route string, status int, message string) {
 	s.failures[route] = failure{status, message}
 }
 
+// Hang makes every later request to route, e.g. "POST /api/search/metadata",
+// go unanswered until the client gives up. The request is still recorded.
+func (s *Server) Hang(route string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.hangs[route] = true
+}
+
 func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 	body, _ := io.ReadAll(r.Body)
 	s.mu.Lock()
@@ -115,8 +126,17 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 		Header: r.Header.Clone(),
 		Body:   body,
 	})
-	f, fail := s.failures[r.Method+" "+r.URL.Path]
+	route := r.Method + " " + r.URL.Path
+	f, fail := s.failures[route]
+	hang := s.hangs[route]
 	s.mu.Unlock()
+	if hang {
+		select {
+		case <-r.Context().Done():
+		case <-s.closed:
+		}
+		return
+	}
 	if fail {
 		writeJSON(w, f.status, map[string]any{
 			"message": f.message, "error": http.StatusText(f.status), "statusCode": f.status,

@@ -8,6 +8,7 @@ import (
 )
 
 func TestStartedMessageGoesToLogChannel(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 
 	h.start()
@@ -34,6 +35,7 @@ func TestStartedMessageGoesToLogChannel(t *testing.T) {
 }
 
 func TestBadConfigFailsFast(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name  string
 		key   string
@@ -58,6 +60,7 @@ func TestBadConfigFailsFast(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			h := newHarness(t)
 			h.env[tt.key] = tt.value
 
@@ -75,6 +78,7 @@ func TestBadConfigFailsFast(t *testing.T) {
 }
 
 func TestBadConfigNamesEveryInvalidVariable(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	h.env["IMMICH_API_KEY"] = ""
 	h.env["WAIT_TIMEOUT"] = "soon"
@@ -91,6 +95,7 @@ func TestBadConfigNamesEveryInvalidVariable(t *testing.T) {
 }
 
 func TestOptionalVariables(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name             string
 		env              map[string]string
@@ -102,6 +107,7 @@ func TestOptionalVariables(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			h := newHarness(t)
 			for k, v := range tt.env {
 				h.env[k] = v
@@ -122,6 +128,7 @@ func TestOptionalVariables(t *testing.T) {
 }
 
 func TestLogsAreStructured(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 
 	h.start()
@@ -138,6 +145,7 @@ func TestLogsAreStructured(t *testing.T) {
 }
 
 func TestStartupFailsWhenStartedMessageIsRejected(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		reply   faketelegram.Reply
@@ -148,6 +156,7 @@ func TestStartupFailsWhenStartedMessageIsRejected(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			h := newHarness(t)
 			h.telegram.Enqueue("sendMessage", tt.reply)
 
@@ -162,6 +171,7 @@ func TestStartupFailsWhenStartedMessageIsRejected(t *testing.T) {
 }
 
 func TestBotTokenIsNotLoggedWhenTelegramIsUnreachable(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	h.env["TELEGRAM_API_URL"] = unreachableURL(t)
 

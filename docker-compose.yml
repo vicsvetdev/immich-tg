@@ -6,6 +6,9 @@ services:
     image: immich-tg:latest
     env_file: .env
     restart: unless-stopped
+    # Room for a failed Video's outcome and then the stopped message, each
+    # allowed 5s once shutdown has begun, before Docker kills the process.
+    stop_grace_period: 15s
     networks:
       - telegram-bot-api
 

@@ -51,6 +51,7 @@ func assertVideo(t *testing.T, c faketelegram.Call, assetID string, width, heigh
 }
 
 func TestReadyVideoIsPostedWithItsTranscode(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	h.immich.AddAsset(fakeimmich.Asset{
 		ID:            "video-1",
@@ -103,6 +104,7 @@ func TestReadyVideoIsPostedWithItsTranscode(t *testing.T) {
 }
 
 func TestPortraitVideosAreSentUpright(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	h.immich.AddAsset(fakeimmich.Asset{ID: "quick-sync", CreatedAt: after(time.Second), Transcoded: true, Transcode: fakeimmich.Rotated90MP4, Duration: time.Second})
 	h.immich.AddAsset(fakeimmich.Asset{ID: "software", CreatedAt: after(2 * time.Second), Transcoded: true, Transcode: fakeimmich.PortraitMP4, Duration: time.Second})
@@ -123,6 +125,7 @@ func TestPortraitVideosAreSentUpright(t *testing.T) {
 }
 
 func TestDurationIsRoundedToWholeSeconds(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	durations := []struct {
 		ms   int
@@ -152,6 +155,7 @@ func TestDurationIsRoundedToWholeSeconds(t *testing.T) {
 }
 
 func TestUploadIsTheWholeTranscode(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	// A Transcode several MiB long: the header comes from its first MiB, and
 	// the upload carries every byte.
@@ -169,6 +173,7 @@ func TestUploadIsTheWholeTranscode(t *testing.T) {
 }
 
 func TestTranscodeHeaderVariants(t *testing.T) {
+	t.Parallel()
 	audio := trak("soun", tkhd(0, identity, 0, 0))
 	tests := []struct {
 		name          string
@@ -197,6 +202,7 @@ func TestTranscodeHeaderVariants(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			h := newHarness(t)
 			h.immich.AddAsset(fakeimmich.Asset{ID: "video", CreatedAt: after(time.Minute), Transcoded: true, Transcode: tt.transcode, Duration: time.Second})
 

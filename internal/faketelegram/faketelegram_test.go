@@ -8,6 +8,7 @@ import (
 	"net/textproto"
 	"strings"
 	"testing"
+	"time"
 
 	"immich-tg/internal/faketelegram"
 )
@@ -115,6 +116,63 @@ func TestDisconnectClosesTheConnectionWithoutAnswer(t *testing.T) {
 	}
 	if calls := s.Calls(); len(calls) != 1 || calls[0].Status != 0 || calls[0].ChatID != "1" {
 		t.Errorf("recorded %+v, want the call without a status", calls)
+	}
+}
+
+func TestHeldReplyIsAnsweredOnRelease(t *testing.T) {
+	s := faketelegram.New(t, token)
+	release := make(chan struct{})
+	s.Enqueue("sendMessage", faketelegram.JSONError(400, "Bad Request: chat not found").After(release))
+
+	answered := make(chan int, 1)
+	go func() {
+		resp, err := http.Post(s.URL()+"/bot"+token+"/sendMessage", "application/json", strings.NewReader(`{"chat_id":"1","text":"x"}`))
+		if err != nil {
+			answered <- 0
+			return
+		}
+		resp.Body.Close()
+		answered <- resp.StatusCode
+	}()
+	deadline := time.Now().Add(5 * time.Second)
+	for len(s.Calls()) == 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("the call was not recorded while held")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	select {
+	case status := <-answered:
+		t.Fatalf("answered %d before the release", status)
+	case <-time.After(20 * time.Millisecond):
+	}
+
+	close(release)
+	if status := <-answered; status != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400", status)
+	}
+	if calls := s.Calls(); len(calls) != 1 || calls[0].Status != http.StatusBadRequest || calls[0].ChatID != "1" {
+		t.Errorf("recorded %+v, want the rejected call", calls)
+	}
+}
+
+func TestQueuedSuccessAnswersAsUsual(t *testing.T) {
+	s := faketelegram.New(t, token)
+	s.Enqueue("sendMessage", faketelegram.Success())
+	s.Enqueue("sendMessage", faketelegram.BareStatus(http.StatusBadGateway))
+
+	for _, want := range []int{http.StatusOK, http.StatusBadGateway} {
+		resp, err := http.Post(s.URL()+"/bot"+token+"/sendMessage", "application/json", strings.NewReader(`{"chat_id":"1","text":"x"}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != want {
+			t.Errorf("status = %d, want %d", resp.StatusCode, want)
+		}
+	}
+	if posts := s.Posts("1"); len(posts) != 1 {
+		t.Errorf("Posts = %+v, want the successful call", posts)
 	}
 }
 

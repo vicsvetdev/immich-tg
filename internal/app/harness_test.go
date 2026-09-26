@@ -165,6 +165,8 @@ type fakeClock struct {
 	now    time.Time
 	waits  []time.Duration
 	timers []*fakeTimer
+	// holdWaits makes After wait for Advance instead of returning at once.
+	holdWaits bool
 }
 
 func (c *fakeClock) Now() time.Time {
@@ -192,15 +194,29 @@ func (c *fakeClock) advance(d time.Duration) {
 }
 
 // After records the wait and returns at once, as if d had passed: the clock
-// moves forward by d.
+// moves forward by d. After HoldWaits, the wait lasts until Advance moves the
+// clock past it instead.
 func (c *fakeClock) After(d time.Duration) <-chan time.Time {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.waits = append(c.waits, d)
-	c.advance(d)
 	ch := make(chan time.Time, 1)
+	if c.holdWaits {
+		due := c.now.Add(d)
+		c.timers = append(c.timers, &fakeTimer{c: c, f: func() { ch <- due }, due: due, armed: true})
+		return ch
+	}
+	c.advance(d)
 	ch <- c.now
 	return ch
+}
+
+// HoldWaits makes later waits last until the test advances the clock past
+// them, so that the test can act while the service waits.
+func (c *fakeClock) HoldWaits() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.holdWaits = true
 }
 
 // Waits returns the durations the service waited with After, in order.

@@ -34,6 +34,7 @@ func (h *harness) logChannelTexts() []string {
 }
 
 func TestWaitingVideoIsDroppedWhenTheOperatorRemovesIt(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name   string
 		remove func(*fakeimmich.Server, string)
@@ -45,6 +46,7 @@ func TestWaitingVideoIsDroppedWhenTheOperatorRemovesIt(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			h := newHarness(t)
 			h.start()
 			h.poll()
@@ -77,6 +79,7 @@ func TestWaitingVideoIsDroppedWhenTheOperatorRemovesIt(t *testing.T) {
 }
 
 func TestDroppedVideoNoLongerHoldsTheSearchWindow(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	// Far beyond the test's polls, so only the drop can release the Video.
 	h.env["WAIT_TIMEOUT"] = "24h"
@@ -87,7 +90,8 @@ func TestDroppedVideoNoLongerHoldsTheSearchWindow(t *testing.T) {
 	h.poll()
 	h.immich.Trash("stuck")
 
-	const polls = 200
+	// Well past the steady state of about 12 tracked Videos.
+	const polls = 40
 	for i := 1; i <= polls; i++ {
 		h.clock.Advance(30 * time.Second)
 		h.immich.AddAsset(fakeimmich.Asset{ID: fmt.Sprintf("video-%d", i), CreatedAt: h.clock.Now(), Transcoded: true})
@@ -100,7 +104,7 @@ func TestDroppedVideoNoLongerHoldsTheSearchWindow(t *testing.T) {
 	// The window follows the newest upload minus the 5-minute overlap.
 	searches := h.immich.SearchBodies()
 	last := searches[len(searches)-1]["filter"].(map[string]any)["createdAt"].(map[string]any)["gte"]
-	if want := "2026-09-26T18:39:05.000Z"; last != want {
+	if want := "2026-09-26T17:19:05.000Z"; last != want {
 		t.Errorf("last search from %v, want %s", last, want)
 	}
 	// Handled Videos are kept for the overlap only: about 11 plus the new one.
@@ -113,6 +117,7 @@ func TestDroppedVideoNoLongerHoldsTheSearchWindow(t *testing.T) {
 }
 
 func TestWaitingVideoTimesOut(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	h.env["WAIT_TIMEOUT"] = "1h"
 	h.start()
@@ -178,6 +183,7 @@ func TestWaitingVideoTimesOut(t *testing.T) {
 }
 
 func TestVideoReadyAtTheTimeoutIsPostedNormally(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	h.start()
 	h.poll()
@@ -196,6 +202,7 @@ func TestVideoReadyAtTheTimeoutIsPostedNormally(t *testing.T) {
 }
 
 func TestTimeoutsAndReadyVideosArePublishedInUploadOrder(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	h.env["WAIT_TIMEOUT"] = "10m"
 	h.start()
@@ -221,6 +228,7 @@ func TestTimeoutsAndReadyVideosArePublishedInUploadOrder(t *testing.T) {
 }
 
 func TestTimeoutReportNotesAFailedLinkOnlyPost(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	h.env["WAIT_TIMEOUT"] = "1h"
 	h.start()

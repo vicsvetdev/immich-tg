@@ -2,10 +2,12 @@ package fakeimmich_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
 	"testing"
+	"time"
 
 	"immich-tg/internal/fakeimmich"
 )
@@ -72,6 +74,26 @@ func TestFailAnswersRouteWithImmichError(t *testing.T) {
 	}
 	if n := len(s.Requests()); n != 2 {
 		t.Errorf("recorded %d requests, want 2", n)
+	}
+}
+
+func TestHangLeavesRouteUnanswered(t *testing.T) {
+	s := fakeimmich.New(t, "key")
+	s.Hang("GET /api/users/me")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, s.URL()+"/api/users/me", nil)
+	req.Header.Set("x-api-key", "key")
+	if resp, err := http.DefaultClient.Do(req); err == nil {
+		resp.Body.Close()
+		t.Fatalf("got HTTP %d, want no answer", resp.StatusCode)
+	}
+	if resp, _ := get(t, s.URL()+"/api/api-keys/me", "key"); resp.StatusCode != http.StatusOK {
+		t.Errorf("other route: status = %d, want 200", resp.StatusCode)
+	}
+	if reqs := s.Requests(); len(reqs) != 2 || reqs[0].Path != "/api/users/me" {
+		t.Errorf("requests = %+v, want the hung one recorded", reqs)
 	}
 }
 

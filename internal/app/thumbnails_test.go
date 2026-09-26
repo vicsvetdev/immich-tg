@@ -83,8 +83,13 @@ func (h *harness) onePost() faketelegram.Call {
 }
 
 func TestThumbnailFromJPEGPreview(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
-	h.immich.AddAsset(fakeimmich.Asset{ID: "video-1", CreatedAt: after(time.Minute), Transcoded: true, Duration: time.Second})
+	h.immich.AddAsset(fakeimmich.Asset{
+		ID: "video-1", CreatedAt: after(time.Minute), Transcoded: true, Duration: time.Second,
+		// The size Immich makes previews by default.
+		Preview: fakeimmich.SplitJPEG(1440, 810),
+	})
 
 	post := h.onePost()
 
@@ -106,6 +111,7 @@ func TestThumbnailFromJPEGPreview(t *testing.T) {
 }
 
 func TestThumbnailFromWebPPreview(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	h.immich.AddAsset(fakeimmich.Asset{
 		ID: "video-1", CreatedAt: after(time.Minute), Transcoded: true, Duration: time.Second,
@@ -119,18 +125,20 @@ func TestThumbnailFromWebPPreview(t *testing.T) {
 }
 
 func TestThumbnailIsScaledToFit(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name                        string
 		previewWidth, previewHeight int
 		width, height               int
 	}{
-		{"oversized landscape", 4000, 3000, 320, 240},
+		{"oversized landscape", 1600, 1200, 320, 240},
 		{"oversized portrait", 1080, 1920, 180, 320},
 		{"odd aspect ratio, rounded", 1000, 333, 320, 107},
 		{"already small enough: not enlarged", 200, 100, 200, 100},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			h := newHarness(t)
 			h.immich.AddAsset(fakeimmich.Asset{
 				ID: "video-1", CreatedAt: after(time.Minute), Transcoded: true, Duration: time.Second,
@@ -145,6 +153,7 @@ func TestThumbnailIsScaledToFit(t *testing.T) {
 }
 
 func TestVideoIsPostedWithoutThumbnailWhenOneCannotBeMade(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name  string
 		asset fakeimmich.Asset
@@ -177,6 +186,7 @@ func TestVideoIsPostedWithoutThumbnailWhenOneCannotBeMade(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			h := newHarness(t)
 			a := tt.asset
 			a.ID, a.CreatedAt, a.Transcoded, a.Duration = "video-1", after(time.Minute), true, time.Second

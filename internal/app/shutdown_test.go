@@ -3,16 +3,19 @@ package app_test
 import (
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
+	"immich-tg/internal/fakeimmich"
 	"immich-tg/internal/faketelegram"
 )
 
 const stoppedText = "🔴 immich-tg stopped"
 
 func TestShutdownPublishesStoppedMessage(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	h.start()
 	h.poll()
@@ -38,6 +41,7 @@ func TestShutdownPublishesStoppedMessage(t *testing.T) {
 }
 
 func TestShutdownExitsCleanlyWhenStoppedMessageFails(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	h.start()
 	h.poll()
@@ -53,6 +57,7 @@ func TestShutdownExitsCleanlyWhenStoppedMessageFails(t *testing.T) {
 }
 
 func TestShutdownDuringStartupChecks(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	// Immich never answers, so the service is stuck in its first check.
 	arrived := make(chan struct{}, 1)
@@ -77,4 +82,112 @@ func TestShutdownDuringStartupChecks(t *testing.T) {
 		t.Errorf("got Telegram calls %+v, want none: the service never started", calls)
 	}
 	h.logLine("stopped during startup")
+}
+
+func TestGenuineFailureIsReportedAfterShutdownBegins(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		// linkOnly is the answer to the Link-only Post, held until shutdown
+		// has begun.
+		linkOnly faketelegram.Reply
+		posts    []string
+		reasons  []string
+	}{
+		{
+			name:     "the Link-only Post goes out",
+			linkOnly: faketelegram.Success(),
+			posts:    []string{textPost("26 Sep 2026, 19:04", 1) + notAvailableNote},
+			reasons:  []string{"telegram sendVideo: 400 Bad Request: wrong file identifier"},
+		},
+		{
+			name:     "the Link-only Post is rejected",
+			linkOnly: faketelegram.JSONError(400, "Bad Request: message is too long"),
+			reasons: []string{
+				"telegram sendVideo: 400 Bad Request: wrong file identifier",
+				"the Link-only Post failed too: telegram sendMessage: 400 Bad Request: message is too long",
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			h := newHarness(t)
+			h.start()
+			h.poll()
+			h.immich.AddAsset(failureVideo(fakeimmich.Asset{}))
+			h.telegram.Enqueue("sendVideo", faketelegram.JSONError(400, "Bad Request: wrong file identifier"))
+			release := make(chan struct{})
+			h.telegram.Enqueue("sendMessage", tt.linkOnly.After(release))
+			h.clock.Advance(30 * time.Second)
+			h.startPoll()
+			h.waitFor("the Link-only Post", func() bool { return len(h.telegram.CallsTo(videoChannel)) == 2 })
+
+			h.cancel() // shutdown begins before Telegram answers
+			close(release)
+			if code := h.waitExit("stop"); code != 0 {
+				t.Errorf("exit code = %d, want 0", code)
+			}
+
+			assertPosts(t, h.posts(), tt.posts...)
+			h.assertProblemReportThen([]string{stoppedText}, "upload failed", tt.reasons...)
+			if n := len(h.logLines("Video abandoned on shutdown")); n != 0 {
+				t.Errorf("got %d abandoned log lines, want none", n)
+			}
+		})
+	}
+}
+
+func TestShutdownEndsRateLimitWait(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.clock.HoldWaits()
+	h.start()
+	h.poll()
+	h.immich.AddAsset(failureVideo(fakeimmich.Asset{}))
+	h.telegram.Enqueue("sendVideo", faketelegram.RateLimited(300))
+	h.clock.Advance(30 * time.Second)
+	h.startPoll()
+	h.waitFor("the rate-limit wait", func() bool { return len(h.clock.Waits()) == 1 })
+
+	if code := h.stop(); code != 0 {
+		t.Errorf("exit code = %d, want 0", code)
+	}
+
+	if n := len(h.sendVideoCalls()); n != 1 {
+		t.Errorf("got %d sendVideo calls, want 1: the upload is not repeated", n)
+	}
+	assertPosts(t, h.posts())
+	if texts := h.logChannelTexts(); !slices.Equal(texts, []string{stoppedText}) {
+		t.Errorf("Log Channel got %q after the started message, want only the stopped message", texts)
+	}
+	if n := len(h.logLines("Problem Report")); n != 0 {
+		t.Errorf("got %d Problem Report log lines, want none", n)
+	}
+	abandoned := h.logLine("Video abandoned on shutdown")
+	if msg, _ := abandoned["error"].(string); !strings.Contains(msg, "stopped waiting for the rate limit: context canceled") {
+		t.Errorf("error = %q, want the interrupted wait", msg)
+	}
+}
+
+func TestShutdownDuringSearchIsNotAnError(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.start()
+	h.poll()
+	h.immich.Hang("POST /api/search/metadata")
+	searches := len(h.immich.SearchBodies())
+	h.startPoll()
+	h.waitFor("the search", func() bool { return len(h.immich.SearchBodies()) > searches })
+
+	if code := h.stop(); code != 0 {
+		t.Errorf("exit code = %d, want 0", code)
+	}
+
+	if entry := h.logLine("Immich search abandoned on shutdown"); entry["level"] != "INFO" {
+		t.Errorf("log line %v, want INFO", entry)
+	}
+	if n := len(h.logLines("could not search Immich for New Videos")); n != 0 {
+		t.Errorf("got %d search error log lines, want none", n)
+	}
 }

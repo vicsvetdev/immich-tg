@@ -12,6 +12,7 @@ import (
 	"immich-tg/internal/clock"
 	"immich-tg/internal/immich"
 	"immich-tg/internal/publisher"
+	"immich-tg/internal/shutdown"
 )
 
 // overlap is how far before the newest upload seen each search starts, to
@@ -77,6 +78,10 @@ func (w *Watcher) WatchStart() time.Time { return w.watchStart }
 func (w *Watcher) Poll(ctx context.Context) {
 	now := w.clock.Now()
 	found, err := w.immich.FindVideos(ctx, w.windowStart)
+	if shutdown.Caused(ctx, err) {
+		w.log.Info("Immich search abandoned on shutdown", "error", err)
+		return
+	}
 	if err != nil {
 		w.log.Error("could not search Immich for New Videos", "error", err)
 		return
