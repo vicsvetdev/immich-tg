@@ -40,6 +40,7 @@ type Server struct {
 	requests    []Request
 	version     Version
 	permissions []string
+	lib         library
 }
 
 // New starts a fake Immich accepting apiKey. It reports a supported version
@@ -54,6 +55,7 @@ func New(t testing.TB, apiKey string) *Server {
 	s.mux.HandleFunc("GET /api/server/version", s.serverVersion)
 	s.mux.HandleFunc("GET /api/users/me", s.authed(s.usersMe))
 	s.mux.HandleFunc("GET /api/api-keys/me", s.authed(s.apiKeysMe))
+	s.serveLibrary()
 	s.srv = httptest.NewServer(http.HandlerFunc(s.handle))
 	t.Cleanup(s.srv.Close)
 	return s

@@ -1,25 +1,153 @@
-// Package watcher is the core loop: it owns the Watch Start and, on each
-// poll, finds New Videos and hands them on for publishing.
+// Package watcher is the core loop: it owns the Watch Start, the search window
+// and the in-memory Video list and, on each poll, finds New Videos and hands
+// the Ready ones to the Publisher in upload order.
 package watcher
 
 import (
 	"context"
+	"log/slog"
+	"slices"
 	"time"
+
+	"immich-tg/internal/clock"
+	"immich-tg/internal/immich"
+	"immich-tg/internal/publisher"
 )
+
+// overlap is how far before the newest upload seen each search starts, to
+// catch rows that appear in Immich late.
+const overlap = 5 * time.Minute
 
 // Watcher tracks New Videos since its Watch Start. It keeps everything in
 // memory; nothing survives a restart.
 type Watcher struct {
-	watchStart time.Time
+	watchStart   time.Time
+	sourceUserID string
+	clock        clock.Clock
+	immich       *immich.Client
+	publisher    *publisher.Publisher
+	log          *slog.Logger
+
+	// windowStart is where the next search starts. It only moves forward.
+	windowStart time.Time
+	// newestSeen is the newest upload time seen, or the Watch Start.
+	newestSeen time.Time
+	// videos holds the Waiting Videos and the handled ones still inside the
+	// search window, by asset id.
+	videos map[string]*video
 }
 
-// New returns a Watcher whose Watch Start is watchStart.
-func New(watchStart time.Time) *Watcher {
-	return &Watcher{watchStart: watchStart}
+// video is a New Video the Watcher knows about.
+type video struct {
+	asset immich.Asset
+	// firstSeen is when the Watcher first saw it, by the service's clock.
+	firstSeen time.Time
+	// handled is set once the Video went to the Publisher. Handled Videos are
+	// kept, to deduplicate overlapping searches, until the window passes them.
+	handled bool
+}
+
+// New returns a Watcher whose Watch Start is now, watching the uploads of the
+// Source User sourceUserID.
+func New(sourceUserID string, clk clock.Clock, immichClient *immich.Client, pub *publisher.Publisher, log *slog.Logger) *Watcher {
+	watchStart := clk.Now()
+	return &Watcher{
+		watchStart:   watchStart,
+		sourceUserID: sourceUserID,
+		clock:        clk,
+		immich:       immichClient,
+		publisher:    pub,
+		log:          log,
+		windowStart:  watchStart,
+		newestSeen:   watchStart,
+		videos:       map[string]*video{},
+	}
 }
 
 // WatchStart is the moment this service instance started watching.
 func (w *Watcher) WatchStart() time.Time { return w.watchStart }
 
-// Poll runs one poll. Detection of New Videos is not implemented yet.
-func (w *Watcher) Poll(ctx context.Context) {}
+// Poll runs one poll: it discovers New Videos and publishes the Ready ones,
+// one at a time, oldest upload first.
+func (w *Watcher) Poll(ctx context.Context) {
+	found, err := w.immich.FindVideos(ctx, w.windowStart)
+	if err != nil {
+		w.log.Error("could not search Immich for New Videos", "error", err)
+		return
+	}
+
+	candidates := w.ownVideos(found.Candidates)
+	for _, a := range candidates {
+		if a.CreatedAt.After(w.newestSeen) {
+			w.newestSeen = a.CreatedAt
+		}
+		if v, ok := w.videos[a.ID]; ok {
+			v.asset = a
+			continue
+		}
+		if a.CreatedAt.Before(w.watchStart) {
+			continue
+		}
+		v := &video{asset: a, firstSeen: w.clock.Now()}
+		w.videos[a.ID] = v
+		w.log.Info("New Video waiting",
+			"asset_id", a.ID,
+			"created_at", a.CreatedAt,
+			"first_seen", v.firstSeen,
+			"tracked", len(w.videos),
+		)
+	}
+
+	for _, a := range candidates {
+		v := w.videos[a.ID]
+		if v == nil || v.handled || !found.Ready[a.ID] {
+			continue
+		}
+		if ctx.Err() != nil {
+			return
+		}
+		w.publisher.Publish(ctx, v.asset)
+		v.handled = true
+	}
+
+	w.advanceWindow()
+}
+
+// ownVideos returns the Source User's assets from as, oldest upload first.
+// Search has no owner filter, so it also returns partners' assets.
+func (w *Watcher) ownVideos(as []immich.Asset) []immich.Asset {
+	var own []immich.Asset
+	for _, a := range as {
+		if a.OwnerID == w.sourceUserID {
+			own = append(own, a)
+		}
+	}
+	slices.SortStableFunc(own, func(a, b immich.Asset) int { return a.CreatedAt.Compare(b.CreatedAt) })
+	return own
+}
+
+// advanceWindow moves the window start to
+// max(Watch Start, min(newest seen − overlap, oldest Waiting)), never
+// backwards, and forgets the handled Videos before it: they can never be
+// returned by a search again. The window is kept at the millisecond precision
+// of Immich's timestamps, which the search uses, so that nothing forgotten can
+// fall between the two.
+func (w *Watcher) advanceWindow() {
+	start := w.newestSeen.Add(-overlap)
+	for _, v := range w.videos {
+		if !v.handled && v.asset.CreatedAt.Before(start) {
+			start = v.asset.CreatedAt
+		}
+	}
+	w.windowStart = latest(w.windowStart, w.watchStart, start).Truncate(time.Millisecond)
+
+	for id, v := range w.videos {
+		if v.handled && v.asset.CreatedAt.Before(w.windowStart) {
+			delete(w.videos, id)
+		}
+	}
+}
+
+func latest(ts ...time.Time) time.Time {
+	return slices.MaxFunc(ts, time.Time.Compare)
+}

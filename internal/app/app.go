@@ -12,6 +12,8 @@ import (
 
 	"immich-tg/internal/clock"
 	"immich-tg/internal/config"
+	"immich-tg/internal/immich"
+	"immich-tg/internal/publisher"
 	"immich-tg/internal/telegram"
 	"immich-tg/internal/watcher"
 )
@@ -57,8 +59,16 @@ func Main(ctx context.Context, getenv func(string) string, opts Options) int {
 	}
 
 	tg := telegram.New(cfg.TelegramAPIURL, cfg.TelegramBotToken, opts.HTTPClient)
+	im := immich.New(cfg.ImmichURL, cfg.ImmichAPIKey, opts.HTTPClient)
 
-	w := watcher.New(opts.Clock.Now())
+	sourceUserID, err := im.SourceUser(ctx)
+	if err != nil {
+		log.Error("could not resolve the Source User", "error", err)
+		return ExitFailure
+	}
+
+	pub := publisher.New(im, tg, cfg.ImmichPublicURL, cfg.VideoChannelID, log)
+	w := watcher.New(sourceUserID, opts.Clock, im, pub, log)
 	started := "🟢 immich-tg started, watching uploads from " + w.WatchStart().Format(watchStartLayout)
 	if err := tg.SendMessage(ctx, telegram.Message{ChatID: cfg.LogChannelID, Text: started}); err != nil {
 		log.Error("could not publish the started message to the Log Channel", "error", err)
