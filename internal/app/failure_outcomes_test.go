@@ -372,6 +372,11 @@ func TestRateLimitedUploadIsWaitedOutAndRepeatedWithAFreshStream(t *testing.T) {
 	if got := posts[0].Fields["caption"]; got != textPost("26 Sep 2026, 19:04", 1) {
 		t.Errorf("caption = %q, want the Post's", got)
 	}
+	// The repeat carries the same thumbnail, made once.
+	decodeThumbnail(t, posts[0])
+	if first, repeat := calls[0].Files["thumb"].Data, posts[0].Files["thumb"].Data; !bytes.Equal(first, repeat) {
+		t.Errorf("the repeat's thumbnail (%d bytes) differs from the first upload's (%d bytes)", len(repeat), len(first))
+	}
 	if waits := h.clock.Waits(); !slices.Equal(waits, []time.Duration{7 * time.Second}) {
 		t.Errorf("waited %v, want the 7s of retry_after", waits)
 	}

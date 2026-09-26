@@ -80,8 +80,8 @@ func TestReadyVideoIsPostedWithItsTranscode(t *testing.T) {
 		}
 	}
 	assertVideo(t, post, "video-1", 1920, 1080, 83, fakeimmich.LandscapeMP4)
-	if len(post.Files) != 1 {
-		t.Errorf("file parts %v, want only video", post.Files)
+	if len(post.Files) != 2 {
+		t.Errorf("file parts %v, want video and thumb", post.Files)
 	}
 	if !post.Chunked {
 		t.Errorf("upload was not sent with chunked transfer encoding")

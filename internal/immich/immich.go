@@ -300,6 +300,32 @@ func (c *Client) OpenTranscode(ctx context.Context, assetID string) (*Transcode,
 	return &Transcode{ReadCloser: body, Size: resp.ContentLength}, nil
 }
 
+// Preview returns a Video's preview image, not its Transcode, and the image's
+// Content-Type, which is JPEG or WebP depending on Immich's config.
+func (c *Client) Preview(ctx context.Context, assetID string) ([]byte, string, error) {
+	path := "/api/assets/" + url.PathEscape(assetID) + "/thumbnail"
+	ctx, cancel := context.WithTimeout(ctx, callTimeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+path+"?size=preview", nil)
+	if err != nil {
+		return nil, "", fmt.Errorf("immich GET %s: %w", path, err)
+	}
+	req.Header.Set("x-api-key", c.apiKey)
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return nil, "", fmt.Errorf("immich GET %s: %w", path, err)
+	}
+	defer resp.Body.Close()
+	data, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseSize))
+	if err != nil {
+		return nil, "", fmt.Errorf("immich GET %s: read response: %w", path, err)
+	}
+	if resp.StatusCode < 200 || resp.StatusCode > 299 {
+		return nil, "", &Error{Method: http.MethodGet, Path: path, StatusCode: resp.StatusCode, Message: errorMessage(data)}
+	}
+	return data, resp.Header.Get("Content-Type"), nil
+}
+
 // playback requests a Video's Transcode, with a Range header unless
 // byteRange is empty. For a Ready Video, Immich serves the Transcode rather
 // than the original.

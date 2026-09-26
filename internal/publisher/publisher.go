@@ -13,6 +13,7 @@ import (
 
 	"immich-tg/internal/immich"
 	"immich-tg/internal/telegram"
+	"immich-tg/internal/thumbnail"
 )
 
 // recordingDateLayout formats the Recording Date in captions.
@@ -81,6 +82,7 @@ func (p *Publisher) postVideo(ctx context.Context, v immich.Asset, shareLink str
 		return &problem{kindDownload, fmt.Errorf("could not read the Transcode header: %w", err)}
 	}
 	width, height := header.DisplaySize()
+	thumb := p.thumbnail(ctx, v.ID, p.log.With("asset_id", v.ID))
 	post := telegram.Video{
 		ChatID:    p.videoChannelID,
 		Open:      func(ctx context.Context) (io.ReadCloser, error) { return p.openTranscode(ctx, v.ID) },
@@ -90,6 +92,7 @@ func (p *Publisher) postVideo(ctx context.Context, v immich.Asset, shareLink str
 		Width:     width,
 		Height:    height,
 		Duration:  int(time.Duration(v.Duration).Round(time.Second) / time.Second),
+		Thumbnail: thumb,
 	}
 	err = p.telegram.SendVideo(ctx, post)
 	if _, ok := errors.AsType[*oversizedError](err); ok {
@@ -134,6 +137,23 @@ type oversizedError struct {
 
 func (e *oversizedError) Error() string {
 	return fmt.Sprintf("the Transcode is %d bytes, over the %d bytes Telegram accepts", e.size, int64(maxTranscodeSize))
+}
+
+// thumbnail makes the Post's thumbnail from the Video's preview image. On
+// failure it returns nil: the Post goes out without one, and it is only
+// logged, never a Problem Report.
+func (p *Publisher) thumbnail(ctx context.Context, assetID string, log *slog.Logger) []byte {
+	preview, contentType, err := p.immich.Preview(ctx, assetID)
+	if err != nil {
+		log.Warn("could not fetch the preview; no thumbnail", "error", err)
+		return nil
+	}
+	thumb, err := thumbnail.Make(preview, contentType)
+	if err != nil {
+		log.Warn("could not make the thumbnail; no thumbnail", "error", err)
+		return nil
+	}
+	return thumb
 }
 
 // caption is a Post's caption in Telegram's HTML parse mode.
