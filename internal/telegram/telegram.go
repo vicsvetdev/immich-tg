@@ -83,7 +83,7 @@ type response struct {
 }
 
 // call sends params as JSON to method and decodes the result into result,
-// unless it is nil.
+// unless it is nil. It is bounded by the call timeout.
 func (c *Client) call(ctx context.Context, method string, params, result any) error {
 	body, err := json.Marshal(params)
 	if err != nil {
@@ -91,11 +91,17 @@ func (c *Client) call(ctx context.Context, method string, params, result any) er
 	}
 	ctx, cancel := context.WithTimeout(ctx, callTimeout)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/bot"+c.token+"/"+method, bytes.NewReader(body))
+	return c.post(ctx, method, "application/json", bytes.NewReader(body), result)
+}
+
+// post sends body to method and decodes the result into result, unless it is
+// nil.
+func (c *Client) post(ctx context.Context, method, contentType string, body io.Reader, result any) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/bot"+c.token+"/"+method, body)
 	if err != nil {
 		return fmt.Errorf("telegram %s: %w", method, c.redact(err))
 	}
-	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Content-Type", contentType)
 
 	resp, err := c.http.Do(req)
 	if err != nil {

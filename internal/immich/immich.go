@@ -10,19 +10,27 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
+
+	"immich-tg/internal/mp4"
 )
 
 const (
 	// maxResponseSize bounds how much of an API response is read. A search
 	// page of 1000 assets is well below it.
 	maxResponseSize = 32 << 20
+	// maxErrorSize bounds how much of an error response to a download is read.
+	maxErrorSize = 64 << 10
 	// callTimeout bounds each API call, so that a hung Immich fails the call
 	// instead of blocking the service.
 	callTimeout = 30 * time.Second
 	// searchPageSize is the number of assets asked for per search page.
 	searchPageSize = 1000
+	// headerSize is how much of the Transcode is read for its header.
+	// Immich encodes with faststart, so the moov box is at the start.
+	headerSize = 1 << 20
 )
 
 // Client calls the Immich API with one API key.
@@ -48,6 +56,20 @@ type Asset struct {
 	// recording, serialised as if it were UTC.
 	LocalDateTime    time.Time `json:"localDateTime"`
 	OriginalFileName string    `json:"originalFileName"`
+	Duration         Duration  `json:"duration"`
+}
+
+// Duration is a Video's length. Immich 3.2 serialises it as an integer of
+// milliseconds. Any other form decodes as zero rather than failing, so that
+// it can never break a whole search.
+type Duration time.Duration
+
+func (d *Duration) UnmarshalJSON(data []byte) error {
+	var ms float64
+	if json.Unmarshal(data, &ms) == nil {
+		*d = Duration(ms * float64(time.Millisecond))
+	}
+	return nil
 }
 
 // Version is an Immich server version.
@@ -221,6 +243,89 @@ func (c *Client) CreateShareLink(ctx context.Context, assetID string) (string, e
 		return "", fmt.Errorf("immich POST /api/shared-links: response has no key")
 	}
 	return link.Key, nil
+}
+
+// TranscodeHeader reads the header of a Ready Video's Transcode from its first
+// MiB.
+func (c *Client) TranscodeHeader(ctx context.Context, assetID string) (mp4.Header, error) {
+	ctx, cancel := context.WithTimeout(ctx, callTimeout)
+	defer cancel()
+	resp, err := c.playback(ctx, assetID, fmt.Sprintf("bytes=0-%d", headerSize-1))
+	if err != nil {
+		return mp4.Header{}, err
+	}
+	defer resp.Body.Close()
+	data, err := io.ReadAll(io.LimitReader(resp.Body, headerSize))
+	if err != nil {
+		return mp4.Header{}, fmt.Errorf("immich GET %s: read response: %w", playbackPath(assetID), err)
+	}
+	h, err := mp4.ReadHeader(data)
+	if err != nil {
+		return mp4.Header{}, fmt.Errorf("immich GET %s: unreadable Transcode header in the first %d bytes: %w", playbackPath(assetID), headerSize, err)
+	}
+	return h, nil
+}
+
+// OpenTranscode opens a stream of a Ready Video's whole Transcode, which the
+// caller must close. Only waiting for the response is bounded by the call
+// timeout: the stream is read as slowly as the upload goes.
+func (c *Client) OpenTranscode(ctx context.Context, assetID string) (io.ReadCloser, error) {
+	ctx, cancel := context.WithCancelCause(ctx)
+	errNoResponse := fmt.Errorf("immich GET %s: no response within %s", playbackPath(assetID), callTimeout)
+	timer := time.AfterFunc(callTimeout, func() { cancel(errNoResponse) })
+	resp, err := c.playback(ctx, assetID, "")
+	if !timer.Stop() { // the timeout fired, during or just after the request
+		if err == nil {
+			resp.Body.Close()
+		}
+		err = errNoResponse
+	}
+	if err != nil {
+		cancel(nil)
+		return nil, err
+	}
+	return &cancelOnClose{resp.Body, func() { cancel(nil) }}, nil
+}
+
+// playback requests a Video's Transcode, with a Range header unless
+// byteRange is empty. For a Ready Video, Immich serves the Transcode rather
+// than the original.
+func (c *Client) playback(ctx context.Context, assetID, byteRange string) (*http.Response, error) {
+	path := playbackPath(assetID)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+path, nil)
+	if err != nil {
+		return nil, fmt.Errorf("immich GET %s: %w", path, err)
+	}
+	req.Header.Set("x-api-key", c.apiKey)
+	if byteRange != "" {
+		req.Header.Set("Range", byteRange)
+	}
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("immich GET %s: %w", path, err)
+	}
+	if resp.StatusCode < 200 || resp.StatusCode > 299 {
+		defer resp.Body.Close()
+		data, _ := io.ReadAll(io.LimitReader(resp.Body, maxErrorSize))
+		return nil, &Error{Method: http.MethodGet, Path: path, StatusCode: resp.StatusCode, Message: errorMessage(data)}
+	}
+	return resp, nil
+}
+
+func playbackPath(assetID string) string {
+	return "/api/assets/" + url.PathEscape(assetID) + "/video/playback"
+}
+
+// cancelOnClose releases a request's context once its body is closed.
+type cancelOnClose struct {
+	io.ReadCloser
+	cancel context.CancelFunc
+}
+
+func (b *cancelOnClose) Close() error {
+	err := b.ReadCloser.Close()
+	b.cancel()
+	return err
 }
 
 // Error is an error answered by Immich.

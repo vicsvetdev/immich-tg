@@ -1,6 +1,7 @@
 package fakeimmich
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -30,6 +31,10 @@ type Asset struct {
 	Trashed          bool
 	// Transcoded is set once the asset has a Transcode (Immich's isEncoded).
 	Transcoded bool
+	// Transcode is the file served as the Transcode. Default: LandscapeMP4.
+	Transcode []byte
+	// Duration is the video's duration, served in milliseconds.
+	Duration time.Duration
 }
 
 // library is the fake's asset state. Server.mu guards it.
@@ -50,6 +55,7 @@ func (s *Server) serveLibrary() {
 	s.lib.pageSize = maxPageSize
 	s.mux.HandleFunc("POST /api/search/metadata", s.authed(s.searchMetadata))
 	s.mux.HandleFunc("POST /api/shared-links", s.authed(s.createSharedLink))
+	s.mux.HandleFunc("GET /api/assets/{id}/video/playback", s.authed(s.videoPlayback))
 }
 
 // AddAsset adds a to the library.
@@ -68,6 +74,9 @@ func (s *Server) AddAsset(a Asset) {
 	}
 	if a.OriginalFileName == "" {
 		a.OriginalFileName = "PXL_" + a.ID + ".mp4"
+	}
+	if a.Transcode == nil {
+		a.Transcode = LandscapeMP4
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -221,6 +230,7 @@ func assetJSON(a Asset) map[string]any {
 		"createdAt":        a.CreatedAt.UTC().Format(time.RFC3339Nano),
 		"localDateTime":    a.LocalDateTime.UTC().Format(time.RFC3339Nano),
 		"originalFileName": a.OriginalFileName,
+		"duration":         a.Duration.Milliseconds(),
 	}
 }
 
@@ -262,6 +272,39 @@ func (s *Server) createSharedLink(w http.ResponseWriter, r *http.Request) {
 		"key":  ShareLinkKey(s.lib.shareLinks),
 		"type": req.Type,
 	})
+}
+
+// videoPlayback serves an asset's Transcode. Like Immich, it supports Range
+// requests and sets Content-Length.
+func (s *Server) videoPlayback(w http.ResponseWriter, r *http.Request) {
+	s.mu.Lock()
+	var transcode []byte
+	for _, a := range s.lib.assets {
+		if a.ID == r.PathValue("id") {
+			transcode = a.Transcode
+		}
+	}
+	s.mu.Unlock()
+	if transcode == nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{
+			"message": "Not found or no asset.view access", "error": "Bad Request", "statusCode": http.StatusBadRequest,
+		})
+		return
+	}
+	w.Header().Set("Content-Type", "video/mp4")
+	http.ServeContent(w, r, "", time.Time{}, bytes.NewReader(transcode))
+}
+
+// PlaybackRequests returns the requests for Transcodes received so far, in
+// order.
+func (s *Server) PlaybackRequests() []Request {
+	var out []Request
+	for _, r := range s.Requests() {
+		if r.Method == http.MethodGet && strings.HasSuffix(r.Path, "/video/playback") {
+			out = append(out, r)
+		}
+	}
+	return out
 }
 
 func badRequest(w http.ResponseWriter, msg string) {

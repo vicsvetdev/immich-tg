@@ -41,7 +41,7 @@ func TestRecordsMultipartFieldsAndFiles(t *testing.T) {
 		t.Fatalf("got %d calls, want 1", len(calls))
 	}
 	c := calls[0]
-	if c.Method != "sendVideo" || c.ChatID != "-100123" || c.Fields["supports_streaming"] != "true" {
+	if c.Method != "sendVideo" || c.ChatID != "-100123" || c.Fields["supports_streaming"] != "true" || c.Chunked {
 		t.Errorf("call = %+v", c)
 	}
 	video := c.Files["video"]
@@ -134,5 +134,24 @@ func TestSetBotMemberChangesGetChatMember(t *testing.T) {
 	}
 	if calls := s.CallsTo("-100123"); len(calls) != 0 {
 		t.Errorf("CallsTo = %+v, want getChatMember left out", calls)
+	}
+}
+
+func TestRecordsChunkedBody(t *testing.T) {
+	s := faketelegram.New(t, token)
+	pr, pw := io.Pipe()
+	go func() {
+		pw.Write([]byte(`{"chat_id":"-100123","text":"hi"}`))
+		pw.Close()
+	}()
+
+	resp, err := http.Post(s.URL()+"/bot"+token+"/sendMessage", "application/json", pr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+
+	if c := s.Calls()[0]; !c.Chunked || c.Fields["text"] != "hi" {
+		t.Errorf("call = %+v, want a chunked sendMessage", c)
 	}
 }

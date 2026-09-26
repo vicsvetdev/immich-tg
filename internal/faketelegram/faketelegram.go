@@ -10,6 +10,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -35,6 +36,8 @@ type Call struct {
 	Fields map[string]string
 	// Files holds the multipart file parts, keyed by part name.
 	Files map[string]File
+	// Chunked is set when the body came with chunked transfer encoding.
+	Chunked bool
 }
 
 // File is a multipart file part.
@@ -144,6 +147,7 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 	token, method, _ := strings.Cut(strings.TrimPrefix(r.URL.Path, "/bot"), "/")
 	call, parseErr := parseCall(r)
 	call.Method, call.Token = method, token
+	call.Chunked = slices.Contains(r.TransferEncoding, "chunked")
 
 	s.mu.Lock()
 	s.calls = append(s.calls, call)
