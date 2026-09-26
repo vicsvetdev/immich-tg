@@ -1,7 +1,9 @@
 package fakeimmich_test
 
 import (
+	"bytes"
 	"encoding/json"
+	"io"
 	"net/http"
 	"testing"
 
@@ -70,5 +72,40 @@ func TestFailAnswersRouteWithImmichError(t *testing.T) {
 	}
 	if n := len(s.Requests()); n != 2 {
 		t.Errorf("recorded %d requests, want 2", n)
+	}
+}
+
+func TestServesTranscodeWithRanges(t *testing.T) {
+	s := fakeimmich.New(t, "key")
+	s.AddAsset(fakeimmich.Asset{ID: "video", Transcode: fakeimmich.PortraitMP4})
+	url := s.URL() + "/api/assets/video/video/playback"
+
+	req, _ := http.NewRequest(http.MethodGet, url, nil)
+	req.Header.Set("x-api-key", "key")
+	req.Header.Set("Range", "bytes=0-99")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusPartialContent || !bytes.Equal(data, fakeimmich.PortraitMP4[:100]) {
+		t.Errorf("ranged playback = %d with %d bytes, want 206 with the first 100", resp.StatusCode, len(data))
+	}
+
+	req, _ = http.NewRequest(http.MethodGet, url, nil)
+	req.Header.Set("x-api-key", "key")
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, _ = io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK || resp.ContentLength != int64(len(fakeimmich.PortraitMP4)) || !bytes.Equal(data, fakeimmich.PortraitMP4) {
+		t.Errorf("playback = %d with %d bytes and Content-Length %d, want 200 with the whole Transcode",
+			resp.StatusCode, len(data), resp.ContentLength)
+	}
+	if n := len(s.PlaybackRequests()); n != 2 {
+		t.Errorf("recorded %d playback requests, want 2", n)
 	}
 }

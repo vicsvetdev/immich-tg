@@ -40,8 +40,9 @@ func New(immichClient *immich.Client, tg *telegram.Client, publicURL, videoChann
 	}
 }
 
-// Publish creates the Video's Share Link and publishes its Post. It is never
-// repeated: whatever the outcome, the Video has been handled.
+// Publish creates the Video's Share Link and publishes its Post with the
+// Transcode. It is never repeated: whatever the outcome, the Video has been
+// handled.
 func (p *Publisher) Publish(ctx context.Context, v immich.Asset) {
 	log := p.log.With("asset_id", v.ID)
 	key, err := p.immich.CreateShareLink(ctx, v.ID)
@@ -49,16 +50,39 @@ func (p *Publisher) Publish(ctx context.Context, v immich.Asset) {
 		log.Error("could not create the Share Link; no Post", "error", err)
 		return
 	}
-	post := telegram.Message{
-		ChatID:    p.videoChannelID,
-		Text:      caption(v.LocalDateTime, p.publicURL+"/share/"+key),
-		ParseMode: "HTML",
+	header, err := p.immich.TranscodeHeader(ctx, v.ID)
+	if err != nil {
+		log.Error("could not read the Transcode header; no Post", "error", err)
+		return
 	}
-	if err := p.telegram.SendMessage(ctx, post); err != nil {
+	width, height := header.DisplaySize()
+	transcode, err := p.immich.OpenTranscode(ctx, v.ID)
+	if err != nil {
+		log.Error("could not download the Transcode; no Post", "error", err)
+		return
+	}
+	defer transcode.Close()
+	post := telegram.Video{
+		ChatID:    p.videoChannelID,
+		File:      transcode,
+		FileName:  v.ID + ".mp4",
+		Caption:   caption(v.LocalDateTime, p.publicURL+"/share/"+key),
+		ParseMode: "HTML",
+		Width:     width,
+		Height:    height,
+		Duration:  int(time.Duration(v.Duration).Round(time.Second) / time.Second),
+	}
+	if err := p.telegram.SendVideo(ctx, post); err != nil {
 		log.Error("could not publish the Post", "error", err)
 		return
 	}
-	log.Info("posted", "recording_date", formatRecordingDate(v.LocalDateTime))
+	log.Info("posted",
+		"recording_date", formatRecordingDate(v.LocalDateTime),
+		"width", post.Width,
+		"height", post.Height,
+		"rotation", header.Rotation,
+		"duration", post.Duration,
+	)
 }
 
 // caption is a Post's caption in Telegram's HTML parse mode.

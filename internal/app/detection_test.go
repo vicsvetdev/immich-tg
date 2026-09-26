@@ -21,28 +21,36 @@ var watchStart = time.Date(2026, 9, 26, 17, 4, 5, 0, time.UTC)
 // after is the time d after the Watch Start.
 func after(d time.Duration) time.Time { return watchStart.Add(d) }
 
-// textPost is the text Post for a Video with the given Recording Date and the
-// n-th Share Link created.
+// textPost is the caption of the Post for a Video with the given Recording
+// Date and the n-th Share Link created.
 func textPost(recordingDate string, n int) string {
 	return fmt.Sprintf("📅 %s\n▶️ <a href=\"%s/share/%s\">Watch in original quality</a>",
 		recordingDate, publicURL, fakeimmich.ShareLinkKey(n))
 }
 
-// posts returns the texts published to the Video Channel, checking that each
-// is a text Post in HTML parse mode.
+// posts returns the captions of the Posts published to the Video Channel:
+// the caption of each video Post and the text of each text message. It checks
+// that each is in HTML parse mode and keeps link previews enabled.
 func (h *harness) posts() []string {
 	h.t.Helper()
-	var texts []string
+	var captions []string
 	for _, c := range h.telegram.CallsTo(videoChannel) {
-		if c.Method != "sendMessage" || c.Fields["parse_mode"] != "HTML" {
-			h.t.Errorf("Video Channel call %s with parse_mode %q, want sendMessage with HTML", c.Method, c.Fields["parse_mode"])
+		if c.Fields["parse_mode"] != "HTML" {
+			h.t.Errorf("Video Channel call %s with parse_mode %q, want HTML", c.Method, c.Fields["parse_mode"])
 		}
 		if _, ok := c.Fields["link_preview_options"]; ok {
 			h.t.Errorf("Post disables link previews: %q", c.Fields["link_preview_options"])
 		}
-		texts = append(texts, c.Fields["text"])
+		switch c.Method {
+		case "sendVideo":
+			captions = append(captions, c.Fields["caption"])
+		case "sendMessage":
+			captions = append(captions, c.Fields["text"])
+		default:
+			h.t.Errorf("Video Channel call %s, want sendVideo or sendMessage", c.Method)
+		}
 	}
-	return texts
+	return captions
 }
 
 // logLines returns every JSON log line with the given message, in order.
@@ -79,7 +87,7 @@ func mustJSON(t *testing.T, s string) map[string]any {
 	return v
 }
 
-func TestReadyVideoIsPostedAsText(t *testing.T) {
+func TestReadyVideoIsPostedWithCaptionAndShareLink(t *testing.T) {
 	h := newHarness(t)
 	h.immich.AddAsset(fakeimmich.Asset{
 		ID:            "video-1",
@@ -372,9 +380,9 @@ func TestVideoIsNotRetriedAfterPostFailure(t *testing.T) {
 	h := newHarness(t)
 
 	h.start()
-	h.poll() // after the started message, so the error hits the Post
+	h.poll()
 	h.immich.AddAsset(fakeimmich.Asset{ID: "video", CreatedAt: after(time.Minute), Transcoded: true})
-	h.telegram.Enqueue("sendMessage", faketelegram.JSONError(400, "Bad Request: chat not found"))
+	h.telegram.Enqueue("sendVideo", faketelegram.JSONError(400, "Bad Request: chat not found"))
 	h.clock.Advance(30 * time.Second)
 	h.poll()
 	h.poll()
