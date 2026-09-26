@@ -56,3 +56,19 @@ func TestReportsConfiguredVersionAndPermissions(t *testing.T) {
 		t.Errorf("permissions = %v", key["permissions"])
 	}
 }
+
+func TestFailAnswersRouteWithImmichError(t *testing.T) {
+	s := fakeimmich.New(t, "key")
+	s.Fail("GET /api/users/me", http.StatusForbidden, "Missing required permission: user.read")
+
+	resp, body := get(t, s.URL()+"/api/users/me", "key")
+	if resp.StatusCode != http.StatusForbidden || body["message"] != "Missing required permission: user.read" {
+		t.Errorf("users/me = %d %v", resp.StatusCode, body)
+	}
+	if resp, _ := get(t, s.URL()+"/api/api-keys/me", "key"); resp.StatusCode != http.StatusOK {
+		t.Errorf("other route: status = %d, want 200", resp.StatusCode)
+	}
+	if n := len(s.Requests()); n != 2 {
+		t.Errorf("recorded %d requests, want 2", n)
+	}
+}

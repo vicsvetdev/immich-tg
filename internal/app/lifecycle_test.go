@@ -169,7 +169,7 @@ func TestBotTokenIsNotLoggedWhenTelegramIsUnreachable(t *testing.T) {
 		t.Errorf("exit code = 0, want non-zero")
 	}
 	out := h.stdout.String()
-	if !strings.Contains(out, "sendMessage") {
+	if !strings.Contains(out, "getMe") {
 		t.Errorf("output does not mention the failed call:\n%s", out)
 	}
 	if strings.Contains(out, botToken) {

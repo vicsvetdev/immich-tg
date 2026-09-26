@@ -10,6 +10,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -83,13 +84,14 @@ type Server struct {
 	mu        sync.Mutex
 	calls     []Call
 	replies   map[string][]Reply
+	members   map[string]map[string]any
 	messageID int
 }
 
 // New starts a fake Bot API server accepting token. It is closed when the
 // test ends.
 func New(t testing.TB, token string) *Server {
-	s := &Server{token: token, replies: map[string][]Reply{}}
+	s := &Server{token: token, replies: map[string][]Reply{}, members: map[string]map[string]any{}}
 	s.srv = httptest.NewServer(http.HandlerFunc(s.handle))
 	t.Cleanup(s.srv.Close)
 	return s
@@ -105,15 +107,29 @@ func (s *Server) Calls() []Call {
 	return append([]Call(nil), s.calls...)
 }
 
-// CallsTo returns the calls addressed to chatID, in order.
+// CallsTo returns the calls that publish to chatID, in order: every call
+// addressed to it except getChatMember, which only reads the chat. Use Calls
+// to see those too.
 func (s *Server) CallsTo(chatID string) []Call {
 	var out []Call
 	for _, c := range s.Calls() {
-		if c.ChatID == chatID {
+		if c.ChatID == chatID && c.Method != "getChatMember" {
 			out = append(out, c)
 		}
 	}
 	return out
+}
+
+// SetBotMember changes what getChatMember answers for the bot in chatID. By
+// default the bot is an administrator allowed to post messages.
+func (s *Server) SetBotMember(chatID, status string, canPostMessages bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	member := map[string]any{"status": status, "user": botUser()}
+	if status == "administrator" {
+		member["can_post_messages"] = canPostMessages
+	}
+	s.members[chatID] = member
 }
 
 // Enqueue makes the next call to method answer with r instead of success.
@@ -157,6 +173,9 @@ func (s *Server) success(call Call) Reply {
 		result = botUser()
 	case "getChatMember":
 		result = map[string]any{"status": "administrator", "user": botUser(), "can_post_messages": true}
+		if m, ok := s.members[call.ChatID]; ok && call.Fields["user_id"] == strconv.Itoa(BotID) {
+			result = m
+		}
 	default:
 		s.messageID++
 		result = map[string]any{

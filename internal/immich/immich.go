@@ -50,19 +50,59 @@ type Asset struct {
 	OriginalFileName string    `json:"originalFileName"`
 }
 
-// SourceUser returns the id of the Source User: the user the API key belongs
+// Version is an Immich server version.
+type Version struct {
+	Major int `json:"major"`
+	Minor int `json:"minor"`
+	Patch int `json:"patch"`
+}
+
+func (v Version) String() string { return fmt.Sprintf("v%d.%d.%d", v.Major, v.Minor, v.Patch) }
+
+// AtLeast reports whether v is oldest or newer.
+func (v Version) AtLeast(oldest Version) bool {
+	if v.Major != oldest.Major {
+		return v.Major > oldest.Major
+	}
+	if v.Minor != oldest.Minor {
+		return v.Minor > oldest.Minor
+	}
+	return v.Patch >= oldest.Patch
+}
+
+// ServerVersion returns the version of the Immich server.
+func (c *Client) ServerVersion(ctx context.Context) (Version, error) {
+	var v Version
+	err := c.call(ctx, http.MethodGet, "/api/server/version", nil, &v)
+	return v, err
+}
+
+// KeyPermissions returns the permissions of the client's API key, such as
+// "asset.read", or "all" for an unrestricted key.
+func (c *Client) KeyPermissions(ctx context.Context) ([]string, error) {
+	var key struct {
+		Permissions []string `json:"permissions"`
+	}
+	err := c.call(ctx, http.MethodGet, "/api/api-keys/me", nil, &key)
+	return key.Permissions, err
+}
+
+// User is an Immich user.
+type User struct {
+	ID string `json:"id"`
+}
+
+// SourceUser returns the Source User: the user the client's API key belongs
 // to.
-func (c *Client) SourceUser(ctx context.Context) (string, error) {
-	var user struct {
-		ID string `json:"id"`
+func (c *Client) SourceUser(ctx context.Context) (User, error) {
+	var u User
+	if err := c.call(ctx, http.MethodGet, "/api/users/me", nil, &u); err != nil {
+		return User{}, err
 	}
-	if err := c.call(ctx, http.MethodGet, "/api/users/me", nil, &user); err != nil {
-		return "", err
+	if u.ID == "" {
+		return User{}, fmt.Errorf("immich GET /api/users/me: response has no user id")
 	}
-	if user.ID == "" {
-		return "", fmt.Errorf("immich GET /api/users/me: response has no user id")
-	}
-	return user.ID, nil
+	return u, nil
 }
 
 // SearchResult holds the videos uploaded since a moment, by any user.

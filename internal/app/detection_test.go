@@ -240,8 +240,19 @@ func TestSearchRequests(t *testing.T) {
 			t.Errorf("%s %s has x-api-key %q, want %q", r.Method, r.Path, r.Header.Get("x-api-key"), apiKey)
 		}
 	}
-	if r := h.immich.Requests(); len(r) == 0 || r[0].Method != http.MethodGet || r[0].Path != "/api/users/me" {
-		t.Errorf("first Immich request is not GET /api/users/me: %+v", r)
+	// The Source User is resolved during the startup checks, before any search.
+	resolvedFirst := false
+	for _, r := range h.immich.Requests() {
+		if r.Method == http.MethodGet && r.Path == "/api/users/me" {
+			resolvedFirst = true
+			break
+		}
+		if r.Path == "/api/search/metadata" {
+			break
+		}
+	}
+	if !resolvedFirst {
+		t.Errorf("GET /api/users/me did not come before the first search")
 	}
 }
 

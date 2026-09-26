@@ -110,3 +110,29 @@ func TestRejectsWrongToken(t *testing.T) {
 		t.Errorf("calls = %+v, want the rejected getMe", c)
 	}
 }
+
+func TestSetBotMemberChangesGetChatMember(t *testing.T) {
+	s := faketelegram.New(t, token)
+	s.SetBotMember("-100123", "member", false)
+
+	member := func(chatID string) string {
+		t.Helper()
+		resp, err := http.Post(s.URL()+"/bot"+token+"/getChatMember", "application/json",
+			strings.NewReader(`{"chat_id":"`+chatID+`","user_id":7000000001}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		body, _ := io.ReadAll(resp.Body)
+		return string(body)
+	}
+	if got := member("-100123"); !strings.Contains(got, `"status":"member"`) || strings.Contains(got, "can_post_messages") {
+		t.Errorf("changed chat = %s, want a plain member", got)
+	}
+	if got := member("-100456"); !strings.Contains(got, `"status":"administrator"`) || !strings.Contains(got, `"can_post_messages":true`) {
+		t.Errorf("other chat = %s, want an administrator allowed to post", got)
+	}
+	if calls := s.CallsTo("-100123"); len(calls) != 0 {
+		t.Errorf("CallsTo = %+v, want getChatMember left out", calls)
+	}
+}
