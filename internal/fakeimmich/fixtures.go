@@ -1,6 +1,12 @@
 package fakeimmich
 
-import _ "embed"
+import (
+	"bytes"
+	_ "embed"
+	"image"
+	"image/color"
+	"image/jpeg"
+)
 
 // Transcode fixtures: tiny 1-second MP4s encoded like Immich's Transcodes,
 // H.264 and AAC with faststart. The audio track comes first, so a reader must
@@ -29,3 +35,44 @@ var (
 	//go:embed fixtures/portrait.mp4
 	PortraitMP4 []byte
 )
+
+// Preview colours: previews are split into a left half in PreviewLeft and a
+// right half in PreviewRight, so that a thumbnail can be checked for the
+// right picture, the right way round.
+var (
+	PreviewLeft  = color.RGBA{0xcc, 0x33, 0x33, 0xff}
+	PreviewRight = color.RGBA{0x33, 0x66, 0xcc, 0xff}
+)
+
+var (
+	// PreviewJPEG is a preview the size Immich makes them by default, 1440×810.
+	PreviewJPEG = SplitJPEG(1440, 810)
+
+	// PreviewWebP is a 1440×810 WebP preview, as Immich makes them when
+	// configured to. It was made with ffmpeg 9:
+	//
+	//	ffmpeg -f lavfi -i color=c=0xcc3333:s=720x810:d=1 -f lavfi -i color=c=0x3366cc:s=720x810:d=1 \
+	//	  -filter_complex "[0][1]hstack" -frames:v 1 -c:v libwebp -quality 50 \
+	//	  -map_metadata -1 -fflags +bitexact -flags +bitexact preview.webp
+	//go:embed fixtures/preview.webp
+	PreviewWebP []byte
+)
+
+// SplitJPEG returns a split preview of the given size.
+func SplitJPEG(width, height int) []byte {
+	img := image.NewRGBA(image.Rect(0, 0, width, height))
+	for y := range height {
+		for x := range width {
+			c := PreviewLeft
+			if x >= width/2 {
+				c = PreviewRight
+			}
+			img.SetRGBA(x, y, c)
+		}
+	}
+	var buf bytes.Buffer
+	if err := jpeg.Encode(&buf, img, &jpeg.Options{Quality: 90}); err != nil {
+		panic(err)
+	}
+	return buf.Bytes()
+}

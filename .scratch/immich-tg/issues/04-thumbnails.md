@@ -6,14 +6,14 @@ See the spec: "Transcode handling → Thumbnail".
 
 **Blocked by:** 03 — Posts carry the Transcode as a playable video.
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] **Source:** the preview is fetched via `GET /api/assets/{id}/thumbnail?size=preview` and decoded according to `Content-Type` (JPEG or WebP).
-- [ ] **Scaling:** it is scaled so the longest side is at most 320 px, keeping aspect ratio.
-- [ ] **Encoding:** it is encoded as JPEG, lowering quality until it is under 204,800 bytes.
-- [ ] **Attachment:** it is sent with `sendVideo` as `thumbnail=attach://thumb` plus a multipart file part named `thumb`.
-- [ ] **Failure is non-fatal:** a failed fetch, decode or encode still produces a normal video Post without a thumbnail, and nothing goes to the Log Channel.
-- [ ] **Tests** cover:
+- [x] **Source:** the preview is fetched via `GET /api/assets/{id}/thumbnail?size=preview` and decoded according to `Content-Type` (JPEG or WebP).
+- [x] **Scaling:** it is scaled so the longest side is at most 320 px, keeping aspect ratio.
+- [x] **Encoding:** it is encoded as JPEG, lowering quality until it is under 204,800 bytes.
+- [x] **Attachment:** it is sent with `sendVideo` as `thumbnail=attach://thumb` plus a multipart file part named `thumb`.
+- [x] **Failure is non-fatal:** a failed fetch, decode or encode still produces a normal video Post without a thumbnail, and nothing goes to the Log Channel.
+- [x] **Tests** cover:
   - a JPEG preview
   - a WebP preview
   - an oversized preview being scaled down

@@ -24,6 +24,8 @@ type Video struct {
 	Width, Height int
 	// Duration is in whole seconds.
 	Duration int
+	// Thumbnail is a JPEG thumbnail, or nil for none.
+	Thumbnail []byte
 }
 
 // SendVideo sends a streamable video. The file is streamed straight into a
@@ -42,7 +44,7 @@ func (c *Client) SendVideo(ctx context.Context, v Video) error {
 	return err
 }
 
-// writeVideo writes v as a multipart form, the file last.
+// writeVideo writes v as a multipart form, the video file last.
 func writeVideo(mw *multipart.Writer, v Video) error {
 	fields := [][2]string{
 		{"chat_id", v.ChatID},
@@ -53,11 +55,26 @@ func writeVideo(mw *multipart.Writer, v Video) error {
 		{"height", strconv.Itoa(v.Height)},
 		{"duration", strconv.Itoa(v.Duration)},
 	}
+	if v.Thumbnail != nil {
+		fields = append(fields, [2]string{"thumbnail", "attach://thumb"})
+	}
 	for _, f := range fields {
 		if f[1] == "" {
 			continue
 		}
 		if err := mw.WriteField(f[0], f[1]); err != nil {
+			return err
+		}
+	}
+	if v.Thumbnail != nil {
+		part, err := mw.CreatePart(textproto.MIMEHeader{
+			"Content-Disposition": {multipart.FileContentDisposition("thumb", "thumb.jpg")},
+			"Content-Type":        {"image/jpeg"},
+		})
+		if err != nil {
+			return err
+		}
+		if _, err := part.Write(v.Thumbnail); err != nil {
 			return err
 		}
 	}
