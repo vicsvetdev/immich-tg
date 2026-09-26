@@ -1,6 +1,6 @@
 // Package watcher is the core loop: it owns the Watch Start, the search window
 // and the in-memory Video list and, on each poll, finds New Videos and hands
-// the Ready ones to the Publisher in upload order.
+// the Ready and timed-out ones to the Publisher in upload order.
 package watcher
 
 import (
@@ -23,6 +23,7 @@ const overlap = 5 * time.Minute
 type Watcher struct {
 	watchStart   time.Time
 	sourceUserID string
+	waitTimeout  time.Duration
 	clock        clock.Clock
 	immich       *immich.Client
 	publisher    *publisher.Publisher
@@ -42,18 +43,21 @@ type video struct {
 	asset immich.Asset
 	// firstSeen is when the Watcher first saw it, by the service's clock.
 	firstSeen time.Time
-	// handled is set once the Video went to the Publisher. Handled Videos are
-	// kept, to deduplicate overlapping searches, until the window passes them.
+	// handled is set once the Video went to the Publisher or was dropped.
+	// Handled Videos are kept, to deduplicate overlapping searches, until the
+	// window passes them.
 	handled bool
 }
 
 // New returns a Watcher whose Watch Start is now, watching the uploads of the
-// Source User sourceUserID.
-func New(sourceUserID string, clk clock.Clock, immichClient *immich.Client, pub *publisher.Publisher, log *slog.Logger) *Watcher {
+// Source User sourceUserID. A Video still Waiting waitTimeout after it was
+// first seen times out.
+func New(sourceUserID string, waitTimeout time.Duration, clk clock.Clock, immichClient *immich.Client, pub *publisher.Publisher, log *slog.Logger) *Watcher {
 	watchStart := clk.Now()
 	return &Watcher{
 		watchStart:   watchStart,
 		sourceUserID: sourceUserID,
+		waitTimeout:  waitTimeout,
 		clock:        clk,
 		immich:       immichClient,
 		publisher:    pub,
@@ -67,9 +71,11 @@ func New(sourceUserID string, clk clock.Clock, immichClient *immich.Client, pub 
 // WatchStart is the moment this service instance started watching.
 func (w *Watcher) WatchStart() time.Time { return w.watchStart }
 
-// Poll runs one poll: it discovers New Videos and publishes the Ready ones,
+// Poll runs one poll: it discovers New Videos, drops the Waiting ones the
+// operator removed and hands the Ready and timed-out ones to the Publisher,
 // one at a time, oldest upload first.
 func (w *Watcher) Poll(ctx context.Context) {
+	now := w.clock.Now()
 	found, err := w.immich.FindVideos(ctx, w.windowStart)
 	if err != nil {
 		w.log.Error("could not search Immich for New Videos", "error", err)
@@ -77,7 +83,9 @@ func (w *Watcher) Poll(ctx context.Context) {
 	}
 
 	candidates := w.ownVideos(found.Candidates)
+	listed := make(map[string]bool, len(candidates))
 	for _, a := range candidates {
+		listed[a.ID] = true
 		if a.CreatedAt.After(w.newestSeen) {
 			w.newestSeen = a.CreatedAt
 		}
@@ -88,7 +96,7 @@ func (w *Watcher) Poll(ctx context.Context) {
 		if a.CreatedAt.Before(w.watchStart) {
 			continue
 		}
-		v := &video{asset: a, firstSeen: w.clock.Now()}
+		v := &video{asset: a, firstSeen: now}
 		w.videos[a.ID] = v
 		w.log.Info("New Video waiting",
 			"asset_id", a.ID,
@@ -98,19 +106,46 @@ func (w *Watcher) Poll(ctx context.Context) {
 		)
 	}
 
+	w.dropMissing(listed)
+
 	for _, a := range candidates {
 		v := w.videos[a.ID]
-		if v == nil || v.handled || !found.Ready[a.ID] {
+		if v == nil || v.handled {
+			continue
+		}
+		ready := found.Ready[a.ID]
+		timedOut := now.Sub(v.firstSeen) > w.waitTimeout
+		if !ready && !timedOut {
 			continue
 		}
 		if ctx.Err() != nil {
 			return
 		}
-		w.publisher.Publish(ctx, v.asset)
+		if ready {
+			w.publisher.Publish(ctx, v.asset)
+		} else {
+			w.log.Info("Waiting Video timed out", "asset_id", a.ID, "first_seen", v.firstSeen)
+			w.publisher.TimedOut(ctx, v.asset, w.waitTimeout)
+		}
 		v.handled = true
 	}
 
 	w.advanceWindow()
+}
+
+// dropMissing silently drops the Waiting Videos that are not listed among the
+// candidates: the operator trashed, archived, locked or deleted them. The
+// search window always includes the oldest Waiting Video, so a missing one
+// really is gone. A dropped Video counts as handled: it is not posted during
+// this run even if restored, and no longer holds the window back.
+func (w *Watcher) dropMissing(listed map[string]bool) {
+	for id, v := range w.videos {
+		if v.handled || listed[id] {
+			continue
+		}
+		v.handled = true
+		w.log.Info("Waiting Video dropped", "asset_id", id, "created_at", v.asset.CreatedAt)
+	}
 }
 
 // ownVideos returns the Source User's assets from as, oldest upload first.

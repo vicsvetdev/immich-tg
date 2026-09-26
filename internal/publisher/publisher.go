@@ -1,4 +1,5 @@
-// Package publisher turns one Ready Video into its Post in the Video Channel.
+// Package publisher turns one Video into its outcome: a Post in the Video
+// Channel, a Link-only Post and/or a Problem Report in the Log Channel.
 package publisher
 
 import (
@@ -21,17 +22,20 @@ type Publisher struct {
 	telegram       *telegram.Client
 	publicURL      string
 	videoChannelID string
+	logChannelID   string
 	log            *slog.Logger
 }
 
-// New returns a Publisher that posts to videoChannelID. Share Links point to
-// publicURL, Immich's public address without a trailing slash.
-func New(immichClient *immich.Client, tg *telegram.Client, publicURL, videoChannelID string, log *slog.Logger) *Publisher {
+// New returns a Publisher that posts to videoChannelID and reports problems to
+// logChannelID. Share Links and the links to assets in Problem Reports point
+// to publicURL, Immich's public address without a trailing slash.
+func New(immichClient *immich.Client, tg *telegram.Client, publicURL, videoChannelID, logChannelID string, log *slog.Logger) *Publisher {
 	return &Publisher{
 		immich:         immichClient,
 		telegram:       tg,
 		publicURL:      publicURL,
 		videoChannelID: videoChannelID,
+		logChannelID:   logChannelID,
 		log:            log,
 	}
 }
