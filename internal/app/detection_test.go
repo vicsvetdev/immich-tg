@@ -29,12 +29,13 @@ func textPost(recordingDate string, n int) string {
 }
 
 // posts returns the captions of the Posts published to the Video Channel:
-// the caption of each video Post and the text of each text message. It checks
-// that each is in HTML parse mode and keeps link previews enabled.
+// the caption of each video Post and the text of each text message, leaving
+// out the calls Telegram rejected. It checks that each is in HTML parse mode
+// and keeps link previews enabled.
 func (h *harness) posts() []string {
 	h.t.Helper()
 	var captions []string
-	for _, c := range h.telegram.CallsTo(videoChannel) {
+	for _, c := range h.telegram.Posts(videoChannel) {
 		if c.Fields["parse_mode"] != "HTML" {
 			h.t.Errorf("Video Channel call %s with parse_mode %q, want HTML", c.Method, c.Fields["parse_mode"])
 		}
@@ -387,8 +388,9 @@ func TestVideoIsNotRetriedAfterPostFailure(t *testing.T) {
 	h.poll()
 	h.poll()
 
-	if n := len(h.telegram.CallsTo(videoChannel)); n != 1 {
-		t.Errorf("got %d Video Channel calls, want the single failed Post", n)
+	calls := h.telegram.CallsTo(videoChannel)
+	if len(calls) != 2 || calls[0].Method != "sendVideo" || calls[1].Method != "sendMessage" {
+		t.Errorf("got Video Channel calls %+v, want the single failed Post and its Link-only Post", calls)
 	}
 }
 

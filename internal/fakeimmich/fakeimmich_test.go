@@ -109,3 +109,59 @@ func TestServesTranscodeWithRanges(t *testing.T) {
 		t.Errorf("recorded %d playback requests, want 2", n)
 	}
 }
+
+func TestDownloadVariants(t *testing.T) {
+	transcode := fakeimmich.PortraitMP4
+	tests := []struct {
+		name   string
+		asset  fakeimmich.Asset
+		status int
+		// contentLength is the Content-Length wanted, -1 for none; the
+		// error's is not checked.
+		contentLength int64
+		complete      bool
+	}{
+		{"failure", fakeimmich.Asset{DownloadFailure: http.StatusBadGateway}, http.StatusBadGateway, 0, false},
+		{"no Content-Length", fakeimmich.Asset{NoContentLength: true}, http.StatusOK, -1, true},
+		{"declared larger", fakeimmich.Asset{ContentLength: 3_000_000_000}, http.StatusOK, 3_000_000_000, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := fakeimmich.New(t, "key")
+			tt.asset.ID, tt.asset.Transcode = "video", transcode
+			s.AddAsset(tt.asset)
+			url := s.URL() + "/api/assets/video/video/playback"
+
+			// The header read is always served normally.
+			req, _ := http.NewRequest(http.MethodGet, url, nil)
+			req.Header.Set("x-api-key", "key")
+			req.Header.Set("Range", "bytes=0-99")
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			resp.Body.Close()
+			if resp.StatusCode != http.StatusPartialContent {
+				t.Errorf("ranged playback = %d, want 206", resp.StatusCode)
+			}
+
+			req, _ = http.NewRequest(http.MethodGet, url, nil)
+			req.Header.Set("x-api-key", "key")
+			resp, err = http.DefaultClient.Do(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			data, readErr := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			if resp.StatusCode != tt.status {
+				t.Errorf("playback = %d, want %d", resp.StatusCode, tt.status)
+			}
+			if tt.status == http.StatusOK && resp.ContentLength != tt.contentLength {
+				t.Errorf("Content-Length = %d, want %d", resp.ContentLength, tt.contentLength)
+			}
+			if complete := readErr == nil && bytes.Equal(data, transcode); complete != tt.complete {
+				t.Errorf("got the whole Transcode: %t (read error %v), want %t", complete, readErr, tt.complete)
+			}
+		})
+	}
+}

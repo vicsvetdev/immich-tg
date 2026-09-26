@@ -12,6 +12,8 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"immich-tg/internal/clock"
 )
 
 const (
@@ -27,12 +29,14 @@ type Client struct {
 	baseURL string
 	token   string
 	http    *http.Client
+	// clock times the waits for rate limits and the upload stall guard.
+	clock clock.Clock
 }
 
 // New returns a client for the Bot API server at baseURL, e.g.
 // http://telegram-bot-api:8081, without a trailing slash.
-func New(baseURL, token string, httpClient *http.Client) *Client {
-	return &Client{baseURL: baseURL, token: token, http: httpClient}
+func New(baseURL, token string, httpClient *http.Client, clk clock.Clock) *Client {
+	return &Client{baseURL: baseURL, token: token, http: httpClient, clock: clk}
 }
 
 // Message is a text message.
@@ -82,16 +86,46 @@ type response struct {
 	} `json:"parameters"`
 }
 
+// rateLimited reports whether err is a 429 that says how long to wait before
+// repeating the call.
+func rateLimited(err error) (retryAfter time.Duration, ok bool) {
+	e, ok := errors.AsType[*Error](err)
+	if !ok || (e.StatusCode != http.StatusTooManyRequests && e.Code != http.StatusTooManyRequests) || e.RetryAfter <= 0 {
+		return 0, false
+	}
+	return e.RetryAfter, true
+}
+
+// waitingOutRateLimits runs attempt and, each time it is rate limited, waits
+// as long as the 429 asks and runs it again. This is the only repeat in the
+// service. It stops waiting when ctx is done.
+func (c *Client) waitingOutRateLimits(ctx context.Context, attempt func() error) error {
+	for {
+		err := attempt()
+		retryAfter, ok := rateLimited(err)
+		if !ok {
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("%w; stopped waiting for the rate limit: %w", err, ctx.Err())
+		case <-c.clock.After(retryAfter):
+		}
+	}
+}
+
 // call sends params as JSON to method and decodes the result into result,
-// unless it is nil. It is bounded by the call timeout.
+// unless it is nil. Each attempt is bounded by the call timeout.
 func (c *Client) call(ctx context.Context, method string, params, result any) error {
 	body, err := json.Marshal(params)
 	if err != nil {
 		return fmt.Errorf("telegram %s: encode request: %w", method, err)
 	}
-	ctx, cancel := context.WithTimeout(ctx, callTimeout)
-	defer cancel()
-	return c.post(ctx, method, "application/json", bytes.NewReader(body), result)
+	return c.waitingOutRateLimits(ctx, func() error {
+		ctx, cancel := context.WithTimeout(ctx, callTimeout)
+		defer cancel()
+		return c.post(ctx, method, "application/json", bytes.NewReader(body), result)
+	})
 }
 
 // post sends body to method and decodes the result into result, unless it is

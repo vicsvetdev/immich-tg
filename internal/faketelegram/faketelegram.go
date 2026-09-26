@@ -38,6 +38,9 @@ type Call struct {
 	Files map[string]File
 	// Chunked is set when the body came with chunked transfer encoding.
 	Chunked bool
+	// Status is the HTTP status the call was answered with, or 0 if it got no
+	// answer: see Disconnect and Stall.
+	Status int
 }
 
 // File is a multipart file part.
@@ -51,6 +54,20 @@ type File struct {
 type Reply struct {
 	Status int
 	Body   string
+
+	disconnect, stall bool
+}
+
+// Disconnect is no response at all: the server reads the request, then closes
+// the connection, as if the Bot API server went away.
+func Disconnect() Reply {
+	return Reply{disconnect: true}
+}
+
+// Stall is a server that stops reading the request, never answers and keeps
+// the connection open until the client gives up.
+func Stall() Reply {
+	return Reply{stall: true}
 }
 
 // JSONError is a Bot API error in its JSON form.
@@ -89,14 +106,18 @@ type Server struct {
 	replies   map[string][]Reply
 	members   map[string]map[string]any
 	messageID int
+
+	// closed is closed when the test ends, releasing stalled calls.
+	closed chan struct{}
 }
 
 // New starts a fake Bot API server accepting token. It is closed when the
 // test ends.
 func New(t testing.TB, token string) *Server {
-	s := &Server{token: token, replies: map[string][]Reply{}, members: map[string]map[string]any{}}
+	s := &Server{token: token, replies: map[string][]Reply{}, members: map[string]map[string]any{}, closed: make(chan struct{})}
 	s.srv = httptest.NewServer(http.HandlerFunc(s.handle))
 	t.Cleanup(s.srv.Close)
+	t.Cleanup(func() { close(s.closed) }) // before Close, which waits for the handlers
 	return s
 }
 
@@ -135,6 +156,17 @@ func (s *Server) SetBotMember(chatID, status string, canPostMessages bool) {
 	s.members[chatID] = member
 }
 
+// Posts returns the calls that published to chatID successfully, in order.
+func (s *Server) Posts(chatID string) []Call {
+	var out []Call
+	for _, c := range s.CallsTo(chatID) {
+		if c.Status == http.StatusOK {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
 // Enqueue makes the next call to method answer with r instead of success.
 // Replies queued for the same method are used in order.
 func (s *Server) Enqueue(method string, r Reply) {
@@ -145,12 +177,21 @@ func (s *Server) Enqueue(method string, r Reply) {
 
 func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 	token, method, _ := strings.Cut(strings.TrimPrefix(r.URL.Path, "/bot"), "/")
+	s.mu.Lock()
+	if q := s.replies[method]; len(q) > 0 && q[0].stall {
+		s.replies[method] = q[1:]
+		s.calls = append(s.calls, Call{Method: method, Token: token})
+		s.mu.Unlock()
+		<-s.closed
+		return
+	}
+	s.mu.Unlock()
+
 	call, parseErr := parseCall(r)
 	call.Method, call.Token = method, token
 	call.Chunked = slices.Contains(r.TransferEncoding, "chunked")
 
 	s.mu.Lock()
-	s.calls = append(s.calls, call)
 	var reply Reply
 	switch {
 	case !strings.HasPrefix(r.URL.Path, "/bot") || method == "":
@@ -164,8 +205,17 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 	default:
 		reply = s.success(call)
 	}
+	call.Status = reply.Status
+	s.calls = append(s.calls, call)
 	s.mu.Unlock()
 
+	if reply.disconnect {
+		conn, _, err := http.NewResponseController(w).Hijack()
+		if err == nil {
+			conn.Close()
+		}
+		return
+	}
 	writeReply(w, reply)
 }
 

@@ -68,7 +68,7 @@ func Main(ctx context.Context, getenv func(string) string, opts Options) int {
 		return ExitFailure
 	}
 
-	tg := telegram.New(cfg.TelegramAPIURL, cfg.TelegramBotToken, opts.HTTPClient)
+	tg := telegram.New(cfg.TelegramAPIURL, cfg.TelegramBotToken, opts.HTTPClient, opts.Clock)
 	im := immich.New(cfg.ImmichURL, cfg.ImmichAPIKey, opts.HTTPClient)
 
 	// startupFailed ends a startup that could not complete. A shutdown

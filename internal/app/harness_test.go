@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"immich-tg/internal/app"
+	"immich-tg/internal/clock"
 	"immich-tg/internal/fakeimmich"
 	"immich-tg/internal/faketelegram"
 )
@@ -87,6 +88,17 @@ func (h *harness) start() {
 // first poll has run.
 func (h *harness) poll() {
 	h.t.Helper()
+	done := h.startPoll()
+	select {
+	case <-done:
+	case <-time.After(waitLimit):
+		h.t.Fatalf("poll did not finish; output:\n%s", h.stdout)
+	}
+}
+
+// startPoll starts one poll and returns a channel closed once it finishes.
+func (h *harness) startPoll() <-chan struct{} {
+	h.t.Helper()
 	done := make(chan struct{})
 	select {
 	case h.polls <- done:
@@ -95,10 +107,25 @@ func (h *harness) poll() {
 	case <-time.After(waitLimit):
 		h.t.Fatalf("service did not accept a poll; output:\n%s", h.stdout)
 	}
-	select {
-	case <-done:
-	case <-time.After(waitLimit):
-		h.t.Fatalf("poll did not finish; output:\n%s", h.stdout)
+	return done
+}
+
+// pollAdvancing runs one poll that needs time to pass, such as one that waits
+// out a stall: it advances the clock by step every few milliseconds until the
+// poll finishes.
+func (h *harness) pollAdvancing(step time.Duration) {
+	h.t.Helper()
+	done := h.startPoll()
+	limit := time.After(waitLimit)
+	for {
+		select {
+		case <-done:
+			return
+		case <-time.After(10 * time.Millisecond):
+			h.clock.Advance(step)
+		case <-limit:
+			h.t.Fatalf("poll did not finish; output:\n%s", h.stdout)
+		}
 	}
 }
 
@@ -131,9 +158,13 @@ func (h *harness) waitExit(what string) int {
 
 func (h *harness) getenv(key string) string { return h.env[key] }
 
+// fakeClock is the service's clock, moved only by the test and by the
+// service's own waits.
 type fakeClock struct {
-	mu  sync.Mutex
-	now time.Time
+	mu     sync.Mutex
+	now    time.Time
+	waits  []time.Duration
+	timers []*fakeTimer
 }
 
 func (c *fakeClock) Now() time.Time {
@@ -142,10 +173,73 @@ func (c *fakeClock) Now() time.Time {
 	return c.now
 }
 
+// Advance moves the clock forward by d, firing the timers that come due.
 func (c *fakeClock) Advance(d time.Duration) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	c.advance(d)
+}
+
+// advance moves the clock forward by d. c.mu must be held.
+func (c *fakeClock) advance(d time.Duration) {
 	c.now = c.now.Add(d)
+	for _, t := range c.timers {
+		if t.armed && !t.due.After(c.now) {
+			t.armed = false
+			go t.f()
+		}
+	}
+}
+
+// After records the wait and returns at once, as if d had passed: the clock
+// moves forward by d.
+func (c *fakeClock) After(d time.Duration) <-chan time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.waits = append(c.waits, d)
+	c.advance(d)
+	ch := make(chan time.Time, 1)
+	ch <- c.now
+	return ch
+}
+
+// Waits returns the durations the service waited with After, in order.
+func (c *fakeClock) Waits() []time.Duration {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return append([]time.Duration(nil), c.waits...)
+}
+
+func (c *fakeClock) AfterFunc(d time.Duration, f func()) clock.Timer {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	t := &fakeTimer{c: c, f: f, due: c.now.Add(d), armed: true}
+	c.timers = append(c.timers, t)
+	return t
+}
+
+// fakeTimer is a timer of the fake clock, fired by Advance.
+type fakeTimer struct {
+	c     *fakeClock
+	f     func()
+	due   time.Time
+	armed bool
+}
+
+func (t *fakeTimer) Reset(d time.Duration) bool {
+	t.c.mu.Lock()
+	defer t.c.mu.Unlock()
+	wasArmed := t.armed
+	t.due, t.armed = t.c.now.Add(d), true
+	return wasArmed
+}
+
+func (t *fakeTimer) Stop() bool {
+	t.c.mu.Lock()
+	defer t.c.mu.Unlock()
+	wasArmed := t.armed
+	t.armed = false
+	return wasArmed
 }
 
 // syncBuffer is a bytes.Buffer safe for the service and the test to share.

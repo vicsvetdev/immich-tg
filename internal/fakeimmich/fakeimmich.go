@@ -42,6 +42,9 @@ type Server struct {
 	permissions []string
 	lib         library
 	failures    map[string]failure
+
+	// closed is closed when the test ends, releasing stalled downloads.
+	closed chan struct{}
 }
 
 type failure struct {
@@ -57,6 +60,7 @@ func New(t testing.TB, apiKey string) *Server {
 		version:     Version{3, 2, 0},
 		permissions: []string{"all"},
 		failures:    map[string]failure{},
+		closed:      make(chan struct{}),
 	}
 	s.mux = http.NewServeMux()
 	s.mux.HandleFunc("GET /api/server/version", s.serverVersion)
@@ -65,6 +69,7 @@ func New(t testing.TB, apiKey string) *Server {
 	s.serveLibrary()
 	s.srv = httptest.NewServer(http.HandlerFunc(s.handle))
 	t.Cleanup(s.srv.Close)
+	t.Cleanup(func() { close(s.closed) }) // before Close, which waits for the handlers
 	return s
 }
 

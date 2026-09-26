@@ -35,6 +35,21 @@ type Asset struct {
 	Transcode []byte
 	// Duration is the video's duration, served in milliseconds.
 	Duration time.Duration
+
+	// The rest change how the whole Transcode is downloaded. Ranged requests,
+	// which read the header, are always served normally.
+
+	// DownloadFailure, if non-zero, is the status a download fails with.
+	DownloadFailure int
+	// ContentLength, if non-zero, is the Content-Length a download declares.
+	// The download still carries only Transcode, so a larger ContentLength
+	// cuts it short.
+	ContentLength int64
+	// NoContentLength makes a download come without a Content-Length.
+	NoContentLength bool
+	// Stall makes a download stop after half the Transcode and hang until the
+	// client goes away.
+	Stall bool
 }
 
 // library is the fake's asset state. Server.mu guards it.
@@ -278,21 +293,56 @@ func (s *Server) createSharedLink(w http.ResponseWriter, r *http.Request) {
 // requests and sets Content-Length.
 func (s *Server) videoPlayback(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
-	var transcode []byte
-	for _, a := range s.lib.assets {
+	var asset *Asset
+	for i, a := range s.lib.assets {
 		if a.ID == r.PathValue("id") {
-			transcode = a.Transcode
+			asset = &s.lib.assets[i]
 		}
 	}
+	var a Asset
+	if asset != nil {
+		a = *asset
+	}
 	s.mu.Unlock()
-	if transcode == nil {
+	if asset == nil {
 		writeJSON(w, http.StatusBadRequest, map[string]any{
 			"message": "Not found or no asset.view access", "error": "Bad Request", "statusCode": http.StatusBadRequest,
 		})
 		return
 	}
 	w.Header().Set("Content-Type", "video/mp4")
-	http.ServeContent(w, r, "", time.Time{}, bytes.NewReader(transcode))
+	if r.Header.Get("Range") != "" {
+		http.ServeContent(w, r, "", time.Time{}, bytes.NewReader(a.Transcode))
+		return
+	}
+
+	switch {
+	case a.DownloadFailure != 0:
+		writeJSON(w, a.DownloadFailure, map[string]any{
+			"message": "Download failed", "error": http.StatusText(a.DownloadFailure), "statusCode": a.DownloadFailure,
+		})
+		return
+	case a.Stall:
+		w.Header().Set("Content-Length", strconv.Itoa(len(a.Transcode)))
+		w.Write(a.Transcode[:len(a.Transcode)/2])
+		w.(http.Flusher).Flush()
+		select {
+		case <-r.Context().Done():
+		case <-s.closed:
+		}
+		return
+	}
+	switch {
+	case a.NoContentLength:
+		// Flushing before the first write sends the body chunked.
+		w.WriteHeader(http.StatusOK)
+		w.(http.Flusher).Flush()
+	case a.ContentLength != 0:
+		w.Header().Set("Content-Length", strconv.FormatInt(a.ContentLength, 10))
+	default:
+		w.Header().Set("Content-Length", strconv.Itoa(len(a.Transcode)))
+	}
+	w.Write(a.Transcode)
 }
 
 // PlaybackRequests returns the requests for Transcodes received so far, in

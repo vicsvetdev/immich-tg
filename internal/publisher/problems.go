@@ -9,38 +9,86 @@ import (
 	"immich-tg/internal/telegram"
 )
 
-// Kinds of problem, named in Problem Reports.
-const kindTimeout = "no Transcode in time"
+// problemKind names the kind of problem in a Problem Report.
+type problemKind string
 
-// Notes that end a Link-only Post's caption, saying why it has no video.
-const noteNotAvailable = "video not available in Telegram"
+const (
+	kindOversized  problemKind = "oversized"
+	kindTimeout    problemKind = "no Transcode in time"
+	kindDownload   problemKind = "Transcode download failed"
+	kindUnreadable problemKind = "Transcode header unreadable"
+	kindUpload     problemKind = "upload failed"
+	kindShareLink  problemKind = "Share Link creation failed"
+)
+
+// linkOnlyNote ends a Link-only Post's caption, saying why it has no video.
+type linkOnlyNote string
+
+const (
+	noteTooLarge     linkOnlyNote = "video too large for Telegram"
+	noteNotAvailable linkOnlyNote = "video not available in Telegram"
+)
+
+// note is the note of the Link-only Post that a problem of kind k gets, or
+// empty if it gets none.
+func (k problemKind) note() linkOnlyNote {
+	switch k {
+	case kindOversized:
+		return noteTooLarge
+	case kindShareLink:
+		return "" // a Post without its Share Link would be a dead end
+	default:
+		return noteNotAvailable
+	}
+}
+
+// problem is why a Video could not be handled as intended.
+type problem struct {
+	kind problemKind
+	err  error
+}
 
 // TimedOut handles a Video that stayed Waiting longer than waitTimeout: it
 // publishes a Link-only Post and a Problem Report. It is never repeated:
 // whatever the outcome, the Video has been handled.
 func (p *Publisher) TimedOut(ctx context.Context, v immich.Asset, waitTimeout time.Duration) {
-	reason := fmt.Errorf("Immich produced no Transcode within WAIT_TIMEOUT (%s)", waitTimeout)
-	if err := p.publishLinkOnly(ctx, v, noteNotAvailable); err != nil {
-		reason = fmt.Errorf("%w; no Link-only Post: %w", reason, err)
+	prob := problem{kindTimeout, fmt.Errorf("Immich produced no Transcode within WAIT_TIMEOUT (%s)", waitTimeout)}
+	shareLink, err := p.shareLink(ctx, v)
+	if err != nil {
+		prob.err = fmt.Errorf("%w; no Link-only Post, could not create the Share Link: %w", prob.err, err)
 	}
-	p.report(ctx, kindTimeout, v, reason)
+	p.fail(ctx, v, shareLink, prob)
 }
 
-// publishLinkOnly creates the Video's Share Link and publishes a Link-only
-// Post: the usual caption plus note. Link previews stay enabled, so that
-// Telegram shows the Share Link page's preview card.
-func (p *Publisher) publishLinkOnly(ctx context.Context, v immich.Asset, note string) error {
-	key, err := p.immich.CreateShareLink(ctx, v.ID)
-	if err != nil {
-		return fmt.Errorf("could not create the Share Link: %w", err)
+// fail handles a Video that could not be posted as intended: it publishes a
+// Link-only Post, given a Share Link and a kind of problem that gets one, then
+// a Problem Report, which notes a failed Link-only Post too. Once the service
+// is shutting down, the failure is only logged: the Video is abandoned, and
+// the stopped message tells the operator why.
+func (p *Publisher) fail(ctx context.Context, v immich.Asset, shareLink string, prob problem) {
+	if note := prob.kind.note(); shareLink != "" && note != "" {
+		if err := p.publishLinkOnly(ctx, v, shareLink, note); err != nil {
+			prob.err = fmt.Errorf("%w; the Link-only Post failed too: %w", prob.err, err)
+		}
 	}
+	if ctx.Err() != nil {
+		p.log.Info("Video abandoned on shutdown", "asset_id", v.ID, "error", prob.err)
+		return
+	}
+	p.report(ctx, v, prob)
+}
+
+// publishLinkOnly publishes a Link-only Post: the usual caption plus note.
+// Link previews stay enabled, so that Telegram shows the Share Link page's
+// preview card.
+func (p *Publisher) publishLinkOnly(ctx context.Context, v immich.Asset, shareLink string, note linkOnlyNote) error {
 	post := telegram.Message{
 		ChatID:    p.videoChannelID,
-		Text:      caption(v.LocalDateTime, p.publicURL+"/share/"+key) + "\nℹ️ " + note,
+		Text:      caption(v.LocalDateTime, shareLink) + "\nℹ️ " + string(note),
 		ParseMode: "HTML",
 	}
 	if err := p.telegram.SendMessage(ctx, post); err != nil {
-		return fmt.Errorf("could not publish the Link-only Post: %w", err)
+		return err
 	}
 	p.log.Info("posted Link-only", "asset_id", v.ID, "recording_date", formatRecordingDate(v.LocalDateTime), "note", note)
 	return nil
@@ -49,22 +97,22 @@ func (p *Publisher) publishLinkOnly(ctx context.Context, v immich.Asset, note st
 // report publishes a Problem Report about the Video to the Log Channel and
 // logs the same information to stdout, so that it is not lost when Telegram
 // cannot be reached.
-func (p *Publisher) report(ctx context.Context, kind string, v immich.Asset, reason error) {
+func (p *Publisher) report(ctx context.Context, v immich.Asset, prob problem) {
 	recordingDate := formatRecordingDate(v.LocalDateTime)
 	// The link to the asset in Immich, for the operator; not a Share Link.
 	assetLink := p.publicURL + "/photos/" + v.ID
 	p.log.Error("Problem Report",
-		"kind", kind,
+		"kind", prob.kind,
 		"asset_id", v.ID,
 		"recording_date", recordingDate,
 		"original_file_name", v.OriginalFileName,
 		"asset_link", assetLink,
-		"error", reason,
+		"error", prob.err,
 	)
 	// Plain text: the filename and error are shown as they are, and Telegram
 	// still makes the asset link clickable.
 	text := fmt.Sprintf("⚠️ Problem: %s\n📅 %s\n📄 %s\n🔗 %s\nReason: %s",
-		kind, recordingDate, v.OriginalFileName, assetLink, reason)
+		prob.kind, recordingDate, v.OriginalFileName, assetLink, prob.err)
 	if err := p.telegram.SendMessage(ctx, telegram.Message{ChatID: p.logChannelID, Text: text}); err != nil {
 		p.log.Error("could not publish the Problem Report to the Log Channel", "asset_id", v.ID, "error", err)
 	}

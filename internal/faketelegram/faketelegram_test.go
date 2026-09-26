@@ -90,8 +90,31 @@ func TestQueuedRepliesAreUsedInOrderThenSuccess(t *testing.T) {
 			t.Errorf("reply %d = %d %q, want %d containing %q", i, resp.StatusCode, body, w.status, w.body)
 		}
 	}
-	if n := len(s.Calls()); n != 3 {
-		t.Errorf("recorded %d calls, want 3", n)
+	calls := s.Calls()
+	if len(calls) != 3 {
+		t.Fatalf("recorded %d calls, want 3", len(calls))
+	}
+	for i, w := range want {
+		if calls[i].Status != w.status {
+			t.Errorf("call %d recorded with status %d, want %d", i, calls[i].Status, w.status)
+		}
+	}
+	if posts := s.Posts("1"); len(posts) != 1 || posts[0].Status != http.StatusOK {
+		t.Errorf("Posts = %+v, want only the successful call", posts)
+	}
+}
+
+func TestDisconnectClosesTheConnectionWithoutAnswer(t *testing.T) {
+	s := faketelegram.New(t, token)
+	s.Enqueue("sendMessage", faketelegram.Disconnect())
+
+	resp, err := http.Post(s.URL()+"/bot"+token+"/sendMessage", "application/json", strings.NewReader(`{"chat_id":"1","text":"x"}`))
+	if err == nil {
+		resp.Body.Close()
+		t.Fatalf("got HTTP %d, want no answer", resp.StatusCode)
+	}
+	if calls := s.Calls(); len(calls) != 1 || calls[0].Status != 0 || calls[0].ChatID != "1" {
+		t.Errorf("recorded %+v, want the call without a status", calls)
 	}
 }
 

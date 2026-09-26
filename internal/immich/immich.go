@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -261,15 +262,26 @@ func (c *Client) TranscodeHeader(ctx context.Context, assetID string) (mp4.Heade
 	}
 	h, err := mp4.ReadHeader(data)
 	if err != nil {
-		return mp4.Header{}, fmt.Errorf("immich GET %s: unreadable Transcode header in the first %d bytes: %w", playbackPath(assetID), headerSize, err)
+		return mp4.Header{}, fmt.Errorf("immich GET %s: %w in the first %d bytes: %w", playbackPath(assetID), ErrUnreadableHeader, headerSize, err)
 	}
 	return h, nil
+}
+
+// ErrUnreadableHeader is returned by TranscodeHeader when the Transcode was
+// downloaded but its header could not be read from it.
+var ErrUnreadableHeader = errors.New("unreadable Transcode header")
+
+// Transcode is an open stream of a Ready Video's whole Transcode.
+type Transcode struct {
+	io.ReadCloser
+	// Size is the Transcode's Content-Length, or -1 if Immich sent none.
+	Size int64
 }
 
 // OpenTranscode opens a stream of a Ready Video's whole Transcode, which the
 // caller must close. Only waiting for the response is bounded by the call
 // timeout: the stream is read as slowly as the upload goes.
-func (c *Client) OpenTranscode(ctx context.Context, assetID string) (io.ReadCloser, error) {
+func (c *Client) OpenTranscode(ctx context.Context, assetID string) (*Transcode, error) {
 	ctx, cancel := context.WithCancelCause(ctx)
 	errNoResponse := fmt.Errorf("immich GET %s: no response within %s", playbackPath(assetID), callTimeout)
 	timer := time.AfterFunc(callTimeout, func() { cancel(errNoResponse) })
@@ -284,7 +296,8 @@ func (c *Client) OpenTranscode(ctx context.Context, assetID string) (io.ReadClos
 		cancel(nil)
 		return nil, err
 	}
-	return &cancelOnClose{resp.Body, func() { cancel(nil) }}, nil
+	body := &transcodeBody{resp.Body, playbackPath(assetID), func() { cancel(nil) }}
+	return &Transcode{ReadCloser: body, Size: resp.ContentLength}, nil
 }
 
 // playback requests a Video's Transcode, with a Range header unless
@@ -316,13 +329,23 @@ func playbackPath(assetID string) string {
 	return "/api/assets/" + url.PathEscape(assetID) + "/video/playback"
 }
 
-// cancelOnClose releases a request's context once its body is closed.
-type cancelOnClose struct {
+// transcodeBody is the body of a Transcode download. It names the request in
+// read errors and releases the request's context once closed.
+type transcodeBody struct {
 	io.ReadCloser
+	path   string
 	cancel context.CancelFunc
 }
 
-func (b *cancelOnClose) Close() error {
+func (b *transcodeBody) Read(p []byte) (int, error) {
+	n, err := b.ReadCloser.Read(p)
+	if err != nil && err != io.EOF {
+		err = fmt.Errorf("immich GET %s: read response: %w", b.path, err)
+	}
+	return n, err
+}
+
+func (b *transcodeBody) Close() error {
 	err := b.ReadCloser.Close()
 	b.cancel()
 	return err

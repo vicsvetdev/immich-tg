@@ -15,10 +15,11 @@ import (
 const notAvailableNote = "\nℹ️ video not available in Telegram"
 
 // logChannelTexts returns the texts published to the Log Channel after the
-// started message, checking that each is a plain-text sendMessage.
+// started message, leaving out the calls Telegram rejected. It checks that
+// each is a plain-text sendMessage.
 func (h *harness) logChannelTexts() []string {
 	h.t.Helper()
-	calls := h.telegram.CallsTo(logChannel)
+	calls := h.telegram.Posts(logChannel)
 	if len(calls) == 0 {
 		h.t.Fatalf("no started message in the Log Channel")
 	}
