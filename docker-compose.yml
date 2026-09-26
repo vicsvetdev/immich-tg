@@ -1,0 +1,16 @@
+name: immich-tg
+
+services:
+  immich-tg:
+    build: .
+    image: immich-tg:latest
+    env_file: .env
+    restart: unless-stopped
+    networks:
+      - telegram-bot-api
+
+networks:
+  # Shared with the Telegram Bot API server project; create it once with
+  # `docker network create telegram-bot-api`.
+  telegram-bot-api:
+    external: true

@@ -1,0 +1,7 @@
+.git
+.scratch
+.env
+docs
+*.md
+Dockerfile
+docker-compose.yml

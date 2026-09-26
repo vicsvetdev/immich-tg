@@ -14,22 +14,22 @@ See the spec (`.scratch/immich-tg/specs.md`): Modules, Deployment and Testing De
 
 **Blocked by:** None — can start immediately.
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] **Required variables load and are validated:** `IMMICH_URL`, `IMMICH_PUBLIC_URL`, `IMMICH_API_KEY`, `TELEGRAM_API_URL`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_VIDEO_CHANNEL_ID`, `TELEGRAM_LOG_CHANNEL_ID`.
-- [ ] **Optional variables load with defaults:** `POLL_INTERVAL` (30s) and `WAIT_TIMEOUT` (2h).
-- [ ] **Bad config fails fast:** a missing or invalid variable exits non-zero with a message naming the variable.
-- [ ] **Started message:** on start, the service records the Watch Start from its clock and publishes `🟢 immich-tg started, watching uploads from <Watch Start>` to the Log Channel.
-- [ ] **Test setup:** the service can be built from config plus an injectable clock and a poll trigger.
-- [ ] **Fakes:** a reusable fake Immich and fake Telegram Bot API (`httptest`) exist. The fake Telegram records every call (method, chat ID and all fields, including multipart parts).
-- [ ] **First test:** the started message goes to the Log Channel.
-- [ ] **Dockerfile:** a multi-stage build producing a static binary on a minimal non-root base image that includes CA certificates.
-- [ ] **`docker-compose.yml`:**
+- [x] **Required variables load and are validated:** `IMMICH_URL`, `IMMICH_PUBLIC_URL`, `IMMICH_API_KEY`, `TELEGRAM_API_URL`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_VIDEO_CHANNEL_ID`, `TELEGRAM_LOG_CHANNEL_ID`.
+- [x] **Optional variables load with defaults:** `POLL_INTERVAL` (30s) and `WAIT_TIMEOUT` (2h).
+- [x] **Bad config fails fast:** a missing or invalid variable exits non-zero with a message naming the variable.
+- [x] **Started message:** on start, the service records the Watch Start from its clock and publishes `🟢 immich-tg started, watching uploads from <Watch Start>` to the Log Channel.
+- [x] **Test setup:** the service can be built from config plus an injectable clock and a poll trigger.
+- [x] **Fakes:** a reusable fake Immich and fake Telegram Bot API (`httptest`) exist. The fake Telegram records every call (method, chat ID and all fields, including multipart parts).
+- [x] **First test:** the started message goes to the Log Channel.
+- [x] **Dockerfile:** a multi-stage build producing a static binary on a minimal non-root base image that includes CA certificates.
+- [x] **`docker-compose.yml`:**
   - one service
   - `env_file: .env`
   - `restart: unless-stopped`
   - joins the external `telegram-bot-api` network
   - no ports
   - no volumes
-- [ ] **`.env.example`:** documents every variable, including the typical values `http://telegram-bot-api:8081` and Immich's LAN URL.
-- [ ] Logs are structured and go to stdout.
+- [x] **`.env.example`:** documents every variable, including the typical values `http://telegram-bot-api:8081` and Immich's LAN URL.
+- [x] Logs are structured and go to stdout.
