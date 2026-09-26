@@ -35,6 +35,10 @@ type Asset struct {
 	Transcode []byte
 	// Duration is the video's duration, served in milliseconds.
 	Duration time.Duration
+	// Preview is the image served as the preview. Default: PreviewJPEG.
+	Preview []byte
+	// PreviewType is the preview's Content-Type. Default: image/jpeg.
+	PreviewType string
 }
 
 // library is the fake's asset state. Server.mu guards it.
@@ -56,6 +60,7 @@ func (s *Server) serveLibrary() {
 	s.mux.HandleFunc("POST /api/search/metadata", s.authed(s.searchMetadata))
 	s.mux.HandleFunc("POST /api/shared-links", s.authed(s.createSharedLink))
 	s.mux.HandleFunc("GET /api/assets/{id}/video/playback", s.authed(s.videoPlayback))
+	s.mux.HandleFunc("GET /api/assets/{id}/thumbnail", s.authed(s.thumbnail))
 }
 
 // AddAsset adds a to the library.
@@ -77,6 +82,12 @@ func (s *Server) AddAsset(a Asset) {
 	}
 	if a.Transcode == nil {
 		a.Transcode = LandscapeMP4
+	}
+	if a.Preview == nil {
+		a.Preview = PreviewJPEG
+	}
+	if a.PreviewType == "" {
+		a.PreviewType = "image/jpeg"
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -293,6 +304,32 @@ func (s *Server) videoPlayback(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "video/mp4")
 	http.ServeContent(w, r, "", time.Time{}, bytes.NewReader(transcode))
+}
+
+// thumbnail serves an asset's preview image. The fake only serves
+// size=preview; Immich's default size is a smaller thumbnail.
+func (s *Server) thumbnail(w http.ResponseWriter, r *http.Request) {
+	if size := r.URL.Query().Get("size"); size != "preview" {
+		badRequest(w, fmt.Sprintf("the fake serves only size=preview, not %q", size))
+		return
+	}
+	s.mu.Lock()
+	var preview []byte
+	var contentType string
+	for _, a := range s.lib.assets {
+		if a.ID == r.PathValue("id") {
+			preview, contentType = a.Preview, a.PreviewType
+		}
+	}
+	s.mu.Unlock()
+	if preview == nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{
+			"message": "Not found or no asset.view access", "error": "Bad Request", "statusCode": http.StatusBadRequest,
+		})
+		return
+	}
+	w.Header().Set("Content-Type", contentType)
+	w.Write(preview)
 }
 
 // PlaybackRequests returns the requests for Transcodes received so far, in

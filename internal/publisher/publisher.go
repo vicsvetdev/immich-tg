@@ -11,6 +11,7 @@ import (
 
 	"immich-tg/internal/immich"
 	"immich-tg/internal/telegram"
+	"immich-tg/internal/thumbnail"
 )
 
 // recordingDateLayout formats the Recording Date in captions.
@@ -56,6 +57,7 @@ func (p *Publisher) Publish(ctx context.Context, v immich.Asset) {
 		return
 	}
 	width, height := header.DisplaySize()
+	thumb := p.thumbnail(ctx, v.ID, log)
 	transcode, err := p.immich.OpenTranscode(ctx, v.ID)
 	if err != nil {
 		log.Error("could not download the Transcode; no Post", "error", err)
@@ -71,6 +73,7 @@ func (p *Publisher) Publish(ctx context.Context, v immich.Asset) {
 		Width:     width,
 		Height:    height,
 		Duration:  int(time.Duration(v.Duration).Round(time.Second) / time.Second),
+		Thumbnail: thumb,
 	}
 	if err := p.telegram.SendVideo(ctx, post); err != nil {
 		log.Error("could not publish the Post", "error", err)
@@ -83,6 +86,23 @@ func (p *Publisher) Publish(ctx context.Context, v immich.Asset) {
 		"rotation", header.Rotation,
 		"duration", post.Duration,
 	)
+}
+
+// thumbnail makes the Post's thumbnail from the Video's preview image. On
+// failure it returns nil: the Post goes out without one, and it is only
+// logged, never a Problem Report.
+func (p *Publisher) thumbnail(ctx context.Context, assetID string, log *slog.Logger) []byte {
+	preview, contentType, err := p.immich.Preview(ctx, assetID)
+	if err != nil {
+		log.Warn("could not fetch the preview; no thumbnail", "error", err)
+		return nil
+	}
+	thumb, err := thumbnail.Make(preview, contentType)
+	if err != nil {
+		log.Warn("could not make the thumbnail; no thumbnail", "error", err)
+		return nil
+	}
+	return thumb
 }
 
 // caption is a Post's caption in Telegram's HTML parse mode.
