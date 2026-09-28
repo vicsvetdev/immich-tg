@@ -5,12 +5,13 @@ immich-tg posts the videos you upload to your self-hosted [Immich](https://immic
 It is a small, stateless Go service that runs in Docker. It watches the uploads of one Immich user, the **Source User** (the owner of the API key). When that user uploads a **New Video**, immich-tg waits until the Video is **Ready**, meaning Immich has made its **Transcode**: a 1080p H.264 MP4 copy. It then publishes one **Post** to the **Video Channel**. A Post contains:
 
 - the Transcode as an inline, streamable Telegram video, with the right aspect ratio, duration and a preview thumbnail. Portrait videos play upright.
-- the **Recording Date**: the local time where the video was recorded, not when it was uploaded.
+- the **Recording Date**, labelled "Recorded": the local time where the video was recorded.
+- the **Upload Date**, labelled "Uploaded": when the video was uploaded to Immich, in immich-tg's time zone (`TZ`).
 - a **Share Link**, "Watch in original quality". It opens the Video in Immich in original quality. Viewers need no account and no password, and the link doesn't expire. Metadata such as location is hidden, and downloading is allowed.
 
 The original file is never uploaded to Telegram, only the Transcode.
 
-Sometimes a Video can't be posted as a video. This happens when the Video is an **Oversized Video**, meaning its Transcode is over 2 GB (2,000,000,000 bytes). It also happens when the Transcode never appears, or can't be read or uploaded. The Video then gets a **Link-only Post** instead: the Recording Date, the Share Link and a short note explaining why there is no player. Each such problem also produces a **Problem Report** in a private **Log Channel**, which only you, the operator, follow. The Log Channel also receives a message whenever immich-tg starts or stops.
+Sometimes a Video can't be posted as a video. This happens when the Video is an **Oversized Video**, meaning its Transcode is over 2 GB (2,000,000,000 bytes). It also happens when the Transcode never appears, or can't be read or uploaded. The Video then gets a **Link-only Post** instead: the Recording Date, the Upload Date, the Share Link and a short note explaining why there is no player. Each such problem also produces a **Problem Report** in a private **Log Channel**, which only you, the operator, follow. The Log Channel also receives a message whenever immich-tg starts or stops.
 
 Uploads go through a Telegram bot and a self-hosted [Telegram Bot API server](https://github.com/tdlib/telegram-bot-api) running in `--local` mode. The public Bot API accepts uploads only up to 50 MB; the local server raises that to 2000 MB. The Bot API server is a separate project, shared with other bots (see [ADR 0001](docs/adr/0001-bot-via-shared-local-bot-api-server.md)).
 
@@ -154,7 +155,7 @@ Edit `.env`. [`.env.example`](.env.example) documents every variable:
 | `TELEGRAM_LOG_CHANNEL_ID` | yes | Same format as the Video Channel's ID. |
 | `POLL_INTERVAL` | no | How often immich-tg asks Immich for New Videos, as a Go duration. Default `30s`. |
 | `WAIT_TIMEOUT` | no | How long a New Video may wait for its Transcode before it gets a Link-only Post and a Problem Report. Default `2h`. Set it above the longest time Immich takes to transcode, including time spent in the queue. |
-| `TZ` | no | Time zone for the Watch Start in the started message, e.g. `Europe/Stockholm`. Default UTC. Recording Dates never depend on it. |
+| `TZ` | no | Time zone for Upload Dates in Posts and for the Watch Start in the started message, e.g. `Europe/Stockholm`. Default UTC. Recording Dates never depend on it. |
 
 ### 8. Start immich-tg
 
@@ -292,7 +293,7 @@ The automated tests can't check this one: whether Telegram's players honour the 
 3. Open the Post in the **Telegram app on a phone**. Check that:
    - the video plays **upright**, in a portrait frame, and streams without first downloading completely;
    - its thumbnail is upright;
-   - the Recording Date is right;
+   - the Recording Date and the Upload Date are right;
    - "Watch in original quality" opens the Video in Immich.
 
 If the video plays sideways, find its `"msg":"posted"` log line. It shows the `width`, `height` and `rotation` that immich-tg read from the Transcode.

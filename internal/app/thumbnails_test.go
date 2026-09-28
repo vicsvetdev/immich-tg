@@ -203,7 +203,7 @@ func TestVideoIsPostedWithoutThumbnailWhenOneCannotBeMade(t *testing.T) {
 			if len(post.Files) != 1 {
 				t.Errorf("file parts %v, want only video", post.Files)
 			}
-			if post.Fields["caption"] != textPost("26 Sep 2026, 17:05", 1) {
+			if post.Fields["caption"] != textPost("26 Sep 2026, 17:05", "26 Sep 2026, 17:05", 1) {
 				t.Errorf("caption = %q, want the usual caption", post.Fields["caption"])
 			}
 			assertVideo(t, post, "video-1", 1920, 1080, 1, fakeimmich.LandscapeMP4)

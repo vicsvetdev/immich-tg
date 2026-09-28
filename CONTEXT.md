@@ -37,15 +37,19 @@ A message in the Log Channel describing why a New Video could not be handled as 
 _Avoid_: alert, error, notification
 
 **Post**:
-The single Video Channel message published for one New Video. Carries the Recording Date and the Share Link, and the Transcode itself unless the Post is Link-only. Once published, a Post is never edited or deleted by the service, even if the Video later changes or disappears in Immich.
+The single Video Channel message published for one New Video. Carries the Recording Date, the Upload Date and the Share Link, and the Transcode itself unless the Post is Link-only. Once published, a Post is never edited or deleted by the service, even if the Video later changes or disappears in Immich.
 _Avoid_: message, notification
 
 **Link-only Post**:
-A Post without the video file: Recording Date, Share Link and a short note why. Used for Oversized Videos and whenever the Transcode could not be obtained or uploaded.
+A Post without the video file: Recording Date, Upload Date, Share Link and a short note why. Used for Oversized Videos and whenever the Transcode could not be obtained or uploaded.
 
 **Recording Date**:
 When the Video was captured, as wall-clock time at the place of recording. Not the upload time.
 _Avoid_: upload date, created date, timestamp
+
+**Upload Date**:
+When the Video was uploaded to Immich (its `createdAt`), shown in the service's time zone (`TZ`). Shown in a Post next to the Recording Date, each labelled, so the two are never confused.
+_Avoid_: created date, timestamp
 
 **Oversized Video**:
 A Video whose Transcode is too large for the bot to upload to Telegram (over 2 GB). At 1080p this means roughly a recording of 30+ minutes.

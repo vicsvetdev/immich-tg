@@ -37,6 +37,8 @@ type harness struct {
 	telegram *faketelegram.Server
 	clock    *fakeClock
 	env      map[string]string
+	// location is the service's time zone, as TZ would set it.
+	location *time.Location
 	stdout   *syncBuffer
 
 	polls  chan chan<- struct{}
@@ -51,6 +53,7 @@ func newHarness(t *testing.T) *harness {
 		immich:   fakeimmich.New(t, apiKey),
 		telegram: faketelegram.New(t, botToken),
 		clock:    &fakeClock{now: time.Date(2026, 9, 26, 17, 4, 5, 0, time.UTC)},
+		location: time.UTC,
 		stdout:   &syncBuffer{},
 		polls:    make(chan chan<- struct{}),
 	}
@@ -72,7 +75,7 @@ func (h *harness) start() {
 	ctx, cancel := context.WithCancel(context.Background())
 	h.cancel = cancel
 	h.exit = make(chan int, 1)
-	opts := app.Options{Stdout: h.stdout, Clock: h.clock, Polls: h.polls}
+	opts := app.Options{Stdout: h.stdout, Clock: h.clock, Location: h.location, Polls: h.polls}
 	go func() { h.exit <- app.Main(ctx, h.getenv, opts) }()
 	h.t.Cleanup(func() {
 		cancel()

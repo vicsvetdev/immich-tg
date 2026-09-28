@@ -16,8 +16,8 @@ import (
 	"immich-tg/internal/thumbnail"
 )
 
-// recordingDateLayout formats the Recording Date in captions.
-const recordingDateLayout = "02 Jan 2006, 15:04"
+// dateLayout formats the Recording Date and Upload Date in captions.
+const dateLayout = "02 Jan 2006, 15:04"
 
 // Publisher publishes Posts.
 type Publisher struct {
@@ -26,19 +26,22 @@ type Publisher struct {
 	publicURL      string
 	videoChannelID string
 	logChannelID   string
+	location       *time.Location
 	log            *slog.Logger
 }
 
 // New returns a Publisher that posts to videoChannelID and reports problems to
 // logChannelID. Share Links and the links to assets in Problem Reports point
-// to publicURL, Immich's public address without a trailing slash.
-func New(immichClient *immich.Client, tg *telegram.Client, publicURL, videoChannelID, logChannelID string, log *slog.Logger) *Publisher {
+// to publicURL, Immich's public address without a trailing slash. Upload Dates
+// are shown in location.
+func New(immichClient *immich.Client, tg *telegram.Client, publicURL, videoChannelID, logChannelID string, location *time.Location, log *slog.Logger) *Publisher {
 	return &Publisher{
 		immich:         immichClient,
 		telegram:       tg,
 		publicURL:      publicURL,
 		videoChannelID: videoChannelID,
 		logChannelID:   logChannelID,
+		location:       location,
 		log:            log,
 	}
 }
@@ -87,7 +90,7 @@ func (p *Publisher) postVideo(ctx context.Context, v immich.Asset, shareLink str
 		ChatID:    p.videoChannelID,
 		Open:      func(ctx context.Context) (io.ReadCloser, error) { return p.openTranscode(ctx, v.ID) },
 		FileName:  v.ID + ".mp4",
-		Caption:   caption(v.LocalDateTime, shareLink),
+		Caption:   p.caption(v, shareLink),
 		ParseMode: "HTML",
 		Width:     width,
 		Height:    height,
@@ -157,14 +160,14 @@ func (p *Publisher) thumbnail(ctx context.Context, assetID string, log *slog.Log
 }
 
 // caption is a Post's caption in Telegram's HTML parse mode.
-func caption(recordingDate time.Time, shareLink string) string {
-	return fmt.Sprintf("📅 %s\n▶️ <a href=\"%s\">Watch in original quality</a>",
-		formatRecordingDate(recordingDate), html.EscapeString(shareLink))
+func (p *Publisher) caption(v immich.Asset, shareLink string) string {
+	return fmt.Sprintf("📅 Recorded: %s\n⬆️ Uploaded: %s\n▶️ <a href=\"%s\">Watch in original quality</a>",
+		formatRecordingDate(v.LocalDateTime), v.CreatedAt.In(p.location).Format(dateLayout), html.EscapeString(shareLink))
 }
 
 // formatRecordingDate formats Immich's localDateTime. It holds the wall-clock
 // time at the place of recording in its UTC fields, so it is formatted as-is,
 // with no time zone conversion.
 func formatRecordingDate(localDateTime time.Time) string {
-	return localDateTime.UTC().Format(recordingDateLayout)
+	return localDateTime.UTC().Format(dateLayout)
 }

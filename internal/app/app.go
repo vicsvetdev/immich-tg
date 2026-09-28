@@ -44,6 +44,9 @@ type Options struct {
 	Stdout io.Writer
 	// Clock is the service's clock. Default: the system clock.
 	Clock clock.Clock
+	// Location is the time zone Upload Dates are shown in. Default: the
+	// local time zone, set by TZ.
+	Location *time.Location
 	// Polls triggers polls. Default: every POLL_INTERVAL.
 	Polls PollTrigger
 	// HTTPClient makes every Immich and Telegram request. Default: a new
@@ -88,7 +91,7 @@ func Main(ctx context.Context, getenv func(string) string, opts Options) int {
 		return startupFailed("startup check failed", "check", check, "error", err)
 	}
 
-	pub := publisher.New(im, tg, cfg.ImmichPublicURL, cfg.VideoChannelID, cfg.LogChannelID, log)
+	pub := publisher.New(im, tg, cfg.ImmichPublicURL, cfg.VideoChannelID, cfg.LogChannelID, opts.Location, log)
 	w := watcher.New(sourceUser.ID, cfg.WaitTimeout, opts.Clock, im, pub, log)
 	started := "🟢 immich-tg started, watching uploads from " + w.WatchStart().Format(watchStartLayout)
 	if err := tg.SendMessage(ctx, telegram.Message{ChatID: cfg.LogChannelID, Text: started}); err != nil {
@@ -136,6 +139,9 @@ func (o Options) withDefaults() Options {
 	}
 	if o.Clock == nil {
 		o.Clock = clock.System{}
+	}
+	if o.Location == nil {
+		o.Location = time.Local
 	}
 	if o.HTTPClient == nil {
 		o.HTTPClient = &http.Client{}

@@ -149,7 +149,7 @@ func TestWaitingVideoTimesOut(t *testing.T) {
 		h.poll()
 	}
 
-	assertPosts(t, h.posts(), textPost("26 Sep 2026, 19:04", 1)+notAvailableNote)
+	assertPosts(t, h.posts(), textPost("26 Sep 2026, 19:04", "26 Sep 2026, 17:04", 1)+notAvailableNote)
 	if n := len(h.immich.ShareLinkBodies()); n != 1 {
 		t.Errorf("created %d Share Links, want 1", n)
 	}
@@ -195,7 +195,7 @@ func TestVideoReadyAtTheTimeoutIsPostedNormally(t *testing.T) {
 	h.clock.Advance(3 * time.Hour) // past the default WAIT_TIMEOUT of 2h
 	h.poll()
 
-	assertPosts(t, h.posts(), textPost("26 Sep 2026, 17:04", 1))
+	assertPosts(t, h.posts(), textPost("26 Sep 2026, 17:04", "26 Sep 2026, 17:04", 1))
 	if texts := h.logChannelTexts(); len(texts) != 0 {
 		t.Errorf("Log Channel got %q, want no Problem Report", texts)
 	}
@@ -218,9 +218,9 @@ func TestTimeoutsAndReadyVideosArePublishedInUploadOrder(t *testing.T) {
 	h.poll()
 
 	assertPosts(t, h.posts(),
-		textPost("01 Jan 2026, 00:00", 1)+notAvailableNote,
-		textPost("02 Jan 2026, 00:00", 2),
-		textPost("03 Jan 2026, 00:00", 3)+notAvailableNote,
+		textPost("01 Jan 2026, 00:00", "26 Sep 2026, 17:04", 1)+notAvailableNote,
+		textPost("02 Jan 2026, 00:00", "26 Sep 2026, 17:04", 2),
+		textPost("03 Jan 2026, 00:00", "26 Sep 2026, 17:04", 3)+notAvailableNote,
 	)
 	if n := len(h.logChannelTexts()); n != 2 {
 		t.Errorf("got %d Problem Reports, want 2", n)

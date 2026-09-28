@@ -95,7 +95,7 @@ func TestOversizedVideoGetsLinkOnlyPostWithoutUpload(t *testing.T) {
 	h.start()
 	h.poll()
 
-	assertPosts(t, h.posts(), textPost("26 Sep 2026, 19:04", 1)+tooLargeNote)
+	assertPosts(t, h.posts(), textPost("26 Sep 2026, 19:04", "26 Sep 2026, 17:05", 1)+tooLargeNote)
 	if calls := h.sendVideoCalls(); len(calls) != 0 {
 		t.Errorf("got %d sendVideo calls, want none: the upload never starts", len(calls))
 	}
@@ -114,7 +114,7 @@ func TestTranscodeOfExactlyTheLimitIsUploaded(t *testing.T) {
 	h.start()
 	h.poll()
 
-	assertPosts(t, h.posts(), textPost("26 Sep 2026, 19:04", 1)+notAvailableNote)
+	assertPosts(t, h.posts(), textPost("26 Sep 2026, 19:04", "26 Sep 2026, 17:05", 1)+notAvailableNote)
 	h.assertProblemReport("Transcode download failed", "could not download the Transcode")
 	// The upload started: the Bot API server records it once it notices the
 	// body end early, which may be just after the poll.
@@ -149,7 +149,7 @@ func TestMissingContentLength(t *testing.T) {
 		h.start()
 		h.poll()
 
-		assertPosts(t, h.posts(), textPost("26 Sep 2026, 19:04", 1)+notAvailableNote)
+		assertPosts(t, h.posts(), textPost("26 Sep 2026, 19:04", "26 Sep 2026, 17:05", 1)+notAvailableNote)
 		h.assertProblemReport("upload failed", "telegram sendVideo: HTTP 413 Request Entity Too Large")
 	})
 }
@@ -225,7 +225,7 @@ func TestUnobtainableTranscodeGetsLinkOnlyPost(t *testing.T) {
 			h.clock.Advance(30 * time.Second)
 			h.poll() // never retried
 
-			assertPosts(t, h.posts(), textPost("26 Sep 2026, 19:04", 1)+notAvailableNote)
+			assertPosts(t, h.posts(), textPost("26 Sep 2026, 19:04", "26 Sep 2026, 17:05", 1)+notAvailableNote)
 			h.assertProblemReport(tt.kind, tt.reasons...)
 		})
 	}
@@ -258,7 +258,7 @@ func TestUploadFailureGetsLinkOnlyPost(t *testing.T) {
 			h.clock.Advance(30 * time.Second)
 			h.poll() // never retried
 
-			assertPosts(t, h.posts(), textPost("26 Sep 2026, 19:04", 1)+notAvailableNote)
+			assertPosts(t, h.posts(), textPost("26 Sep 2026, 19:04", "26 Sep 2026, 17:05", 1)+notAvailableNote)
 			h.assertProblemReport("upload failed", tt.reason)
 			if n := len(h.sendVideoCalls()); n != 1 {
 				t.Errorf("got %d sendVideo calls, want 1", n)
@@ -390,7 +390,7 @@ func TestRateLimitedUploadIsWaitedOutAndRepeatedWithAFreshStream(t *testing.T) {
 		t.Fatalf("got %d Posts, want 1", len(posts))
 	}
 	assertVideo(t, posts[0], "video-1", 1920, 1080, 83, transcode)
-	if got := posts[0].Fields["caption"]; got != textPost("26 Sep 2026, 19:04", 1) {
+	if got := posts[0].Fields["caption"]; got != textPost("26 Sep 2026, 19:04", "26 Sep 2026, 17:05", 1) {
 		t.Errorf("caption = %q, want the Post's", got)
 	}
 	// The repeat carries the same thumbnail, made once.
@@ -432,7 +432,7 @@ func TestRateLimitedMessagesAreWaitedOut(t *testing.T) {
 	h.clock.Advance(30 * time.Second)
 	h.poll()
 
-	assertPosts(t, h.posts(), textPost("26 Sep 2026, 19:04", 1)+notAvailableNote)
+	assertPosts(t, h.posts(), textPost("26 Sep 2026, 19:04", "26 Sep 2026, 17:05", 1)+notAvailableNote)
 	h.assertProblemReport("upload failed", "wrong file identifier")
 	want := []time.Duration{2 * time.Second, 5 * time.Second, 3 * time.Second, 4 * time.Second, 4 * time.Second}
 	if waits := h.clock.Waits(); !slices.Equal(waits, want) {
@@ -473,7 +473,7 @@ func TestRateLimitWaitsAreCapped(t *testing.T) {
 		h.start()
 		h.poll()
 
-		assertPosts(t, h.posts(), textPost("26 Sep 2026, 19:04", 1)+notAvailableNote)
+		assertPosts(t, h.posts(), textPost("26 Sep 2026, 19:04", "26 Sep 2026, 17:05", 1)+notAvailableNote)
 		h.assertProblemReport("upload failed",
 			"telegram sendVideo: 429 Too Many Requests: retry after 301",
 			"not waited out: the rate-limit wait of 5m1s is over the 5m0s limit")
@@ -496,7 +496,7 @@ func TestStalledUploadIsAbandoned(t *testing.T) {
 		h.start()
 		h.pollAdvancing(30 * time.Second)
 
-		assertPosts(t, h.posts(), textPost("26 Sep 2026, 19:04", 1)+notAvailableNote)
+		assertPosts(t, h.posts(), textPost("26 Sep 2026, 19:04", "26 Sep 2026, 17:05", 1)+notAvailableNote)
 		h.assertProblemReport("Transcode download failed", "could not download the Transcode: stalled: no data for 2m0s")
 	})
 	t.Run("the Bot API server stalls", func(t *testing.T) {
@@ -510,7 +510,7 @@ func TestStalledUploadIsAbandoned(t *testing.T) {
 		h.start()
 		h.pollAdvancing(30 * time.Second)
 
-		assertPosts(t, h.posts(), textPost("26 Sep 2026, 19:04", 1)+notAvailableNote)
+		assertPosts(t, h.posts(), textPost("26 Sep 2026, 19:04", "26 Sep 2026, 17:05", 1)+notAvailableNote)
 		h.assertProblemReport("upload failed", "stalled: the Bot API server took no data for 2m0s")
 	})
 }

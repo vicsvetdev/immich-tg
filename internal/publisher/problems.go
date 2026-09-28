@@ -96,7 +96,7 @@ func (p *Publisher) publishOutcome(ctx context.Context, v immich.Asset, shareLin
 func (p *Publisher) publishLinkOnly(ctx context.Context, v immich.Asset, shareLink string, note linkOnlyNote) error {
 	post := telegram.Message{
 		ChatID:    p.videoChannelID,
-		Text:      caption(v.LocalDateTime, shareLink) + "\nℹ️ " + string(note),
+		Text:      p.caption(v, shareLink) + "\nℹ️ " + string(note),
 		ParseMode: "HTML",
 	}
 	if err := p.telegram.SendMessage(ctx, post); err != nil {

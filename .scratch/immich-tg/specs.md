@@ -17,7 +17,7 @@ The operator wants something small that runs on the homelab alongside Immich, is
 immich-tg is a small, stateless Go service running in Docker. It regularly asks Immich for Videos the Source User uploaded after the Watch Start. For each New Video it waits until the video is Ready, meaning Immich has produced its 1080p H.264 Transcode. It then publishes one Post to the Video Channel. The Post contains:
 
 - the Transcode as a playable Telegram video
-- the Recording Date
+- the Recording Date and the Upload Date
 - a Share Link, so viewers can watch or download the original quality in Immich
 
 Link-only Posts cover Videos whose Transcode is over 2 GB, never appears in time, or can't be read or uploaded. Every such problem also goes to a private Log Channel as a Problem Report, together with started/stopped messages that make downtime visible.
@@ -237,9 +237,11 @@ Uploads go through a bot and a separate, shared, self-hosted Telegram Bot API se
 ### Post content
 
 - **Recording Date:** the asset's `localDateTime`. This is the wall-clock time at the place of recording, but it is serialised with a `Z` suffix. The service formats its UTC fields as-is, with **no time zone conversion**, as `02 Jan 2006, 15:04` (for example `26 Sep 2026, 19:04`).
+- **Upload Date:** the asset's `createdAt`, a real instant, converted to the service's time zone (`TZ`, default UTC) and formatted the same way.
 - **Caption** (HTML parse mode):
   ```
-  📅 <Recording Date>
+  📅 Recorded: <Recording Date>
+  ⬆️ Uploaded: <Upload Date>
   ▶️ <a href="<Share Link>">Watch in original quality</a>
   ```
 - **Link-only Post:** `sendMessage` with the same caption plus a short reason note. There are two variants:
