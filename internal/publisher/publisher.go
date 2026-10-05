@@ -9,6 +9,7 @@ import (
 	"html"
 	"io"
 	"log/slog"
+	"net/url"
 	"time"
 
 	"immich-tg/internal/immich"
@@ -55,28 +56,40 @@ const maxTranscodeSize = 2_000_000_000
 // Problem Report. It is never repeated: whatever the outcome, the Video has
 // been handled.
 func (p *Publisher) Publish(ctx context.Context, v immich.Asset) {
-	shareLink, err := p.shareLink(ctx, v)
+	l, err := p.shareLink(ctx, v)
 	if err != nil {
-		p.fail(ctx, v, "", problem{kind: kindShareLink, err: err})
+		p.fail(ctx, v, links{}, problem{kind: kindShareLink, err: err})
 		return
 	}
-	if prob := p.postVideo(ctx, v, shareLink); prob != nil {
-		p.fail(ctx, v, shareLink, *prob)
+	if prob := p.postVideo(ctx, v, l); prob != nil {
+		p.fail(ctx, v, l, *prob)
 	}
 }
 
-// shareLink creates the Video's Share Link and returns its URL.
-func (p *Publisher) shareLink(ctx context.Context, v immich.Asset) (string, error) {
+// links are the links in a Post, both opened by the Video's Share Link.
+type links struct {
+	// original plays the original file in the browser.
+	original string
+	// page is the Share Link's page in Immich, which plays the Transcode and
+	// offers the original for download.
+	page string
+}
+
+// shareLink creates the Video's Share Link and returns the Post's links.
+func (p *Publisher) shareLink(ctx context.Context, v immich.Asset) (links, error) {
 	key, err := p.immich.CreateShareLink(ctx, v.ID)
 	if err != nil {
-		return "", err
+		return links{}, err
 	}
-	return p.publicURL + "/share/" + key, nil
+	return links{
+		original: p.publicURL + immich.OriginalPath(v.ID) + "?key=" + url.QueryEscape(key),
+		page:     p.publicURL + "/share/" + key,
+	}, nil
 }
 
 // postVideo publishes the Video's Post with the Transcode, or returns why it
 // could not.
-func (p *Publisher) postVideo(ctx context.Context, v immich.Asset, shareLink string) *problem {
+func (p *Publisher) postVideo(ctx context.Context, v immich.Asset, l links) *problem {
 	header, err := p.immich.TranscodeHeader(ctx, v.ID)
 	if errors.Is(err, immich.ErrUnreadableHeader) {
 		return &problem{kindUnreadable, err}
@@ -90,7 +103,7 @@ func (p *Publisher) postVideo(ctx context.Context, v immich.Asset, shareLink str
 		ChatID:    p.videoChannelID,
 		Open:      func(ctx context.Context) (io.ReadCloser, error) { return p.openTranscode(ctx, v.ID) },
 		FileName:  v.ID + ".mp4",
-		Caption:   p.caption(v, shareLink),
+		Caption:   p.caption(v, l),
 		ParseMode: "HTML",
 		Width:     width,
 		Height:    height,
@@ -160,9 +173,10 @@ func (p *Publisher) thumbnail(ctx context.Context, assetID string, log *slog.Log
 }
 
 // caption is a Post's caption in Telegram's HTML parse mode.
-func (p *Publisher) caption(v immich.Asset, shareLink string) string {
-	return fmt.Sprintf("📅 Recorded: %s\n⬆️ Uploaded: %s\n▶️ <a href=\"%s\">Watch in original quality</a>",
-		formatRecordingDate(v.LocalDateTime), v.CreatedAt.In(p.location).Format(dateLayout), html.EscapeString(shareLink))
+func (p *Publisher) caption(v immich.Asset, l links) string {
+	return fmt.Sprintf("📅 Recorded: %s\n⬆️ Uploaded: %s\n▶️ <a href=\"%s\">Watch in original quality</a>\n🌐 <a href=\"%s\">Open in Immich</a>",
+		formatRecordingDate(v.LocalDateTime), v.CreatedAt.In(p.location).Format(dateLayout),
+		html.EscapeString(l.original), html.EscapeString(l.page))
 }
 
 // formatRecordingDate formats Immich's localDateTime. It holds the wall-clock

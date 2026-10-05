@@ -57,33 +57,33 @@ func (p *Publisher) TimedOut(ctx context.Context, v immich.Asset, waitTimeout ti
 	ctx, cancel := shutdown.Outlive(ctx)
 	defer cancel()
 	prob := problem{kindTimeout, fmt.Errorf("Immich produced no Transcode within WAIT_TIMEOUT (%s)", waitTimeout)}
-	shareLink, err := p.shareLink(ctx, v)
+	l, err := p.shareLink(ctx, v)
 	if err != nil {
 		prob.err = fmt.Errorf("%w; no Link-only Post, could not create the Share Link: %w", prob.err, err)
 	}
-	p.publishOutcome(ctx, v, shareLink, prob)
+	p.publishOutcome(ctx, v, l, prob)
 }
 
 // fail handles a Video that could not be posted as intended. A failure caused
 // by the shutdown abandons the Video: it is only logged, and the stopped
 // message tells the operator why. Any other failure gets its outcome, even
 // once shutdown has begun, within the shutdown grace.
-func (p *Publisher) fail(ctx context.Context, v immich.Asset, shareLink string, prob problem) {
+func (p *Publisher) fail(ctx context.Context, v immich.Asset, l links, prob problem) {
 	if shutdown.Caused(ctx, prob.err) {
 		p.log.Info("Video abandoned on shutdown", "asset_id", v.ID, "error", prob.err)
 		return
 	}
 	ctx, cancel := shutdown.Outlive(ctx)
 	defer cancel()
-	p.publishOutcome(ctx, v, shareLink, prob)
+	p.publishOutcome(ctx, v, l, prob)
 }
 
 // publishOutcome publishes a failure's outcome: a Link-only Post, given a
 // Share Link and a kind of problem that gets one, then a Problem Report, which
 // notes a failed Link-only Post too.
-func (p *Publisher) publishOutcome(ctx context.Context, v immich.Asset, shareLink string, prob problem) {
-	if note := prob.kind.note(); shareLink != "" && note != "" {
-		if err := p.publishLinkOnly(ctx, v, shareLink, note); err != nil {
+func (p *Publisher) publishOutcome(ctx context.Context, v immich.Asset, l links, prob problem) {
+	if note := prob.kind.note(); l != (links{}) && note != "" {
+		if err := p.publishLinkOnly(ctx, v, l, note); err != nil {
 			prob.err = fmt.Errorf("%w; the Link-only Post failed too: %w", prob.err, err)
 		}
 	}
@@ -91,13 +91,14 @@ func (p *Publisher) publishOutcome(ctx context.Context, v immich.Asset, shareLin
 }
 
 // publishLinkOnly publishes a Link-only Post: the usual caption plus note.
-// Link previews stay enabled, so that Telegram shows the Share Link page's
-// preview card.
-func (p *Publisher) publishLinkOnly(ctx context.Context, v immich.Asset, shareLink string, note linkOnlyNote) error {
+// Link previews stay enabled, pointed at the Share Link page, so that Telegram
+// shows its preview card rather than one for the original file.
+func (p *Publisher) publishLinkOnly(ctx context.Context, v immich.Asset, l links, note linkOnlyNote) error {
 	post := telegram.Message{
-		ChatID:    p.videoChannelID,
-		Text:      p.caption(v, shareLink) + "\nℹ️ " + string(note),
-		ParseMode: "HTML",
+		ChatID:     p.videoChannelID,
+		Text:       p.caption(v, l) + "\nℹ️ " + string(note),
+		ParseMode:  "HTML",
+		PreviewURL: l.page,
 	}
 	if err := p.telegram.SendMessage(ctx, post); err != nil {
 		return err

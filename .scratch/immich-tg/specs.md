@@ -54,9 +54,9 @@ Uploads go through a bot and a separate, shared, self-hosted Telegram Bot API se
 18. As a viewer, I want portrait videos to play upright, so that I don't have to turn my phone.
 19. As a viewer, I want videos to stream while they download, so that long videos start playing quickly.
 20. As a viewer, I want each Post to show the Recording Date in the local time of the place of recording, so that I know when it happened.
-21. As a viewer, I want a "Watch in original quality" link in each Post, so that I can watch or download the full-quality file in Immich.
+21. As a viewer, I want a "Watch in original quality" link in each Post, so that I can play the full-quality file in the browser, and an "Open in Immich" link to the Share Link page, which plays anywhere and offers the download.
 22. As a viewer, I want the Share Link to work without an Immich account, a password or an expiry, so that old Posts keep working.
-23. As the operator, I want Share Links to hide metadata, so that viewers never see where a video was recorded.
+23. ~~As the operator, I want Share Links to hide metadata, so that viewers never see where a video was recorded.~~ Dropped: Immich forbids downloading from a link that hides metadata, and the original carries the location anyway ([ADR 0004](../../docs/adr/0004-share-links-show-metadata.md)).
 24. As the operator, I want Share Links to allow downloading, so that viewers can get the original quality.
 25. As the operator, I want the caption to omit filenames, locations and camera details, so that Posts stay clean and private.
 26. As a viewer, I want an Oversized Video to still appear as a Link-only Post with a short note and a link preview, so that I know it exists, can see what it is, and know why there's no player.
@@ -203,7 +203,7 @@ Uploads go through a bot and a separate, shared, self-hosted Telegram Bot API se
 
 - Created just before publishing with `POST /api/shared-links`:
   ```json
-  {"type": "INDIVIDUAL", "assetIds": ["<id>"], "allowDownload": true, "showMetadata": false, "allowUpload": false}
+  {"type": "INDIVIDUAL", "assetIds": ["<id>"], "allowDownload": true, "showMetadata": true, "allowUpload": false}
   ```
   No `expiresAt`, `password` or `slug`.
 - Its URL is `IMMICH_PUBLIC_URL` + `/share/` + the response's `key`.
@@ -242,13 +242,14 @@ Uploads go through a bot and a separate, shared, self-hosted Telegram Bot API se
   ```
   📅 Recorded: <Recording Date>
   ⬆️ Uploaded: <Upload Date>
-  ▶️ <a href="<Share Link>">Watch in original quality</a>
+  ▶️ <a href="<IMMICH_PUBLIC_URL>/api/assets/<id>/original?key=<key>">Watch in original quality</a>
+  🌐 <a href="<Share Link>">Open in Immich</a>
   ```
 - **Link-only Post:** `sendMessage` with the same caption plus a short reason note. There are two variants:
   - "video too large for Telegram", for Oversized Videos
   - "video not available in Telegram", for timeout, unreadable Transcode or upload failures
 
-  Link previews stay **enabled**, which is the Telegram default, so no `link_preview_options` are sent. This lets Telegram show the Share Link page's preview card.
+  Link previews stay **enabled**, with `link_preview_options` `{"url": "<Share Link>"}`, so that Telegram shows the Share Link page's preview card rather than one for the original file, the first link.
 
 ### Outcomes per Video
 

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"reflect"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -21,17 +22,24 @@ var watchStart = time.Date(2026, 9, 26, 17, 4, 5, 0, time.UTC)
 // after is the time d after the Watch Start.
 func after(d time.Duration) time.Time { return watchStart.Add(d) }
 
-// textPost is the caption of the Post for a Video with the given Recording
-// Date and Upload Date, and the n-th Share Link created.
-func textPost(recordingDate, uploadDate string, n int) string {
-	return fmt.Sprintf("📅 Recorded: %s\n⬆️ Uploaded: %s\n▶️ <a href=\"%s/share/%s\">Watch in original quality</a>",
-		recordingDate, uploadDate, publicURL, fakeimmich.ShareLinkKey(n))
+// textPost is the caption of the Post for the Video with the given id,
+// Recording Date and Upload Date, and the n-th Share Link created.
+func textPost(recordingDate, uploadDate, id string, n int) string {
+	return fmt.Sprintf("📅 Recorded: %s\n⬆️ Uploaded: %s\n▶️ <a href=\"%s/api/assets/%s/original?key=%s\">Watch in original quality</a>\n🌐 <a href=\"%s\">Open in Immich</a>",
+		recordingDate, uploadDate, publicURL, id, fakeimmich.ShareLinkKey(n), sharePage(n))
 }
+
+// sharePage is the URL of the n-th Share Link's page.
+func sharePage(n int) string { return publicURL + "/share/" + fakeimmich.ShareLinkKey(n) }
+
+// sharePageLink finds the Share Link page's link in a Post's caption.
+var sharePageLink = regexp.MustCompile(`<a href="([^"]*/share/[^"]*)">`)
 
 // posts returns the captions of the Posts published to the Video Channel:
 // the caption of each video Post and the text of each text message, leaving
-// out the calls Telegram rejected. It checks that each is in HTML parse mode
-// and keeps link previews enabled.
+// out the calls Telegram rejected. It checks that each is in HTML parse mode,
+// and that each text message keeps link previews enabled, previewing its
+// Share Link page.
 func (h *harness) posts() []string {
 	h.t.Helper()
 	var captions []string
@@ -39,13 +47,21 @@ func (h *harness) posts() []string {
 		if c.Fields["parse_mode"] != "HTML" {
 			h.t.Errorf("Video Channel call %s with parse_mode %q, want HTML", c.Method, c.Fields["parse_mode"])
 		}
-		if _, ok := c.Fields["link_preview_options"]; ok {
-			h.t.Errorf("Post disables link previews: %q", c.Fields["link_preview_options"])
-		}
 		switch c.Method {
 		case "sendVideo":
+			if opts, ok := c.Fields["link_preview_options"]; ok {
+				h.t.Errorf("video Post has link_preview_options %q, want none", opts)
+			}
 			captions = append(captions, c.Fields["caption"])
 		case "sendMessage":
+			var page string
+			if m := sharePageLink.FindStringSubmatch(c.Fields["text"]); m != nil {
+				page = m[1]
+			}
+			want, _ := json.Marshal(map[string]string{"url": page})
+			if got := c.Fields["link_preview_options"]; got != string(want) {
+				h.t.Errorf("Link-only Post has link_preview_options %q, want %s", got, want)
+			}
 			captions = append(captions, c.Fields["text"])
 		default:
 			h.t.Errorf("Video Channel call %s, want sendVideo or sendMessage", c.Method)
@@ -101,9 +117,9 @@ func TestReadyVideoIsPostedWithCaptionAndShareLink(t *testing.T) {
 	h.start()
 	h.poll()
 
-	assertPosts(t, h.posts(), textPost("26 Sep 2026, 19:04", "26 Sep 2026, 17:05", 1))
+	assertPosts(t, h.posts(), textPost("26 Sep 2026, 19:04", "26 Sep 2026, 17:05", "video-1", 1))
 	links := h.immich.ShareLinkBodies()
-	want := mustJSON(t, `{"type":"INDIVIDUAL","assetIds":["video-1"],"allowDownload":true,"showMetadata":false,"allowUpload":false}`)
+	want := mustJSON(t, `{"type":"INDIVIDUAL","assetIds":["video-1"],"allowDownload":true,"showMetadata":true,"allowUpload":false}`)
 	if len(links) != 1 || !reflect.DeepEqual(links[0], want) {
 		t.Errorf("Share Link requests = %v, want one %v", links, want)
 	}
@@ -138,7 +154,7 @@ func TestWaitingVideoIsPostedOnceReady(t *testing.T) {
 	h.immich.SetTranscoded("video-1")
 	h.clock.Advance(30 * time.Second)
 	h.poll()
-	assertPosts(t, h.posts(), textPost("26 Sep 2026, 17:04", "26 Sep 2026, 17:04", 1))
+	assertPosts(t, h.posts(), textPost("26 Sep 2026, 17:04", "26 Sep 2026, 17:04", "video-1", 1))
 }
 
 func TestVideosFromBeforeWatchStartAreExcluded(t *testing.T) {
@@ -163,7 +179,7 @@ func TestVideosFromBeforeWatchStartAreExcluded(t *testing.T) {
 	h.clock.Advance(30 * time.Second)
 	h.poll()
 
-	assertPosts(t, h.posts(), textPost("02 Jan 2020, 03:04", "26 Sep 2026, 17:04", 1))
+	assertPosts(t, h.posts(), textPost("02 Jan 2020, 03:04", "26 Sep 2026, 17:04", "at-watch-start", 1))
 	links := h.immich.ShareLinkBodies()
 	if len(links) != 1 || !reflect.DeepEqual(links[0]["assetIds"], []any{"at-watch-start"}) {
 		t.Errorf("Share Link requests = %v, want one for at-watch-start", links)
@@ -208,7 +224,7 @@ func TestOnlyVideosOnTheTimelineArePosted(t *testing.T) {
 	h.start()
 	h.poll()
 
-	assertPosts(t, h.posts(), textPost("01 Sep 2026, 12:00", "26 Sep 2026, 17:05", 1))
+	assertPosts(t, h.posts(), textPost("01 Sep 2026, 12:00", "26 Sep 2026, 17:05", "video", 1))
 }
 
 func TestSearchRequests(t *testing.T) {
@@ -284,7 +300,7 @@ func TestSearchFollowsPages(t *testing.T) {
 			LocalDateTime: recorded,
 			Transcoded:    true,
 		})
-		want = append(want, textPost(recorded.Format("02 Jan 2006, 15:04"), after(time.Duration(i)*time.Minute).Format("02 Jan 2006, 15:04"), i))
+		want = append(want, textPost(recorded.Format("02 Jan 2006, 15:04"), after(time.Duration(i)*time.Minute).Format("02 Jan 2006, 15:04"), fmt.Sprintf("video-%d", i), i))
 	}
 
 	h.start()
@@ -320,7 +336,7 @@ func TestRecordingDateIsFormattedWithoutTimeZoneConversion(t *testing.T) {
 			h.start()
 			h.poll()
 
-			assertPosts(t, h.posts(), textPost(tt.want, "26 Sep 2026, 17:05", 1))
+			assertPosts(t, h.posts(), textPost(tt.want, "26 Sep 2026, 17:05", "video", 1))
 		})
 	}
 }
@@ -341,7 +357,7 @@ func TestUploadDateIsShownInTheServiceTimeZone(t *testing.T) {
 
 	// The Upload Date crosses midnight in the service's time zone; the
 	// Recording Date is not converted.
-	assertPosts(t, h.posts(), textPost("26 Sep 2026, 19:04", "27 Sep 2026, 03:05", 1))
+	assertPosts(t, h.posts(), textPost("26 Sep 2026, 19:04", "27 Sep 2026, 03:05", "video", 1))
 }
 
 func TestBurstIsPostedInUploadOrder(t *testing.T) {
@@ -356,9 +372,9 @@ func TestBurstIsPostedInUploadOrder(t *testing.T) {
 	h.poll()
 
 	assertPosts(t, h.posts(),
-		textPost("01 Aug 2026, 00:00", "26 Sep 2026, 17:04", 1),
-		textPost("20 Sep 2026, 00:00", "26 Sep 2026, 17:04", 2),
-		textPost("10 Sep 2026, 00:00", "26 Sep 2026, 17:04", 3),
+		textPost("01 Aug 2026, 00:00", "26 Sep 2026, 17:04", "first", 1),
+		textPost("20 Sep 2026, 00:00", "26 Sep 2026, 17:04", "second", 2),
+		textPost("10 Sep 2026, 00:00", "26 Sep 2026, 17:04", "third", 3),
 	)
 	var ids []any
 	for _, b := range h.immich.ShareLinkBodies() {
@@ -385,7 +401,7 @@ func TestVideoInOverlappingPollsIsPostedOnce(t *testing.T) {
 		h.clock.Advance(30 * time.Second)
 	}
 
-	assertPosts(t, h.posts(), textPost("26 Sep 2026, 17:05", "26 Sep 2026, 17:05", 1), textPost("26 Sep 2026, 17:14", "26 Sep 2026, 17:14", 2))
+	assertPosts(t, h.posts(), textPost("26 Sep 2026, 17:05", "26 Sep 2026, 17:05", "video", 1), textPost("26 Sep 2026, 17:14", "26 Sep 2026, 17:14", "later", 2))
 	if n := len(h.immich.ShareLinkBodies()); n != 2 {
 		t.Errorf("created %d Share Links, want 2", n)
 	}

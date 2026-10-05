@@ -97,7 +97,7 @@ func TestGenuineFailureIsReportedAfterShutdownBegins(t *testing.T) {
 		{
 			name:     "the Link-only Post goes out",
 			linkOnly: faketelegram.Success(),
-			posts:    []string{textPost("26 Sep 2026, 19:04", "26 Sep 2026, 17:05", 1) + notAvailableNote},
+			posts:    []string{textPost("26 Sep 2026, 19:04", "26 Sep 2026, 17:05", "video-1", 1) + notAvailableNote},
 			reasons:  []string{"telegram sendVideo: 400 Bad Request: wrong file identifier"},
 		},
 		{

@@ -225,7 +225,8 @@ func formatTime(t time.Time) string {
 }
 
 // CreateShareLink creates a Share Link for one asset and returns its key.
-// Viewers can download the original but never see its metadata.
+// Viewers can download the original, which is what lets them play it in the
+// browser. Immich only allows downloading when metadata is shown, so it is.
 func (c *Client) CreateShareLink(ctx context.Context, assetID string) (string, error) {
 	body := struct {
 		Type          string   `json:"type"`
@@ -233,9 +234,10 @@ func (c *Client) CreateShareLink(ctx context.Context, assetID string) (string, e
 		AllowDownload bool     `json:"allowDownload"`
 		ShowMetadata  bool     `json:"showMetadata"`
 		AllowUpload   bool     `json:"allowUpload"`
-	}{"INDIVIDUAL", []string{assetID}, true, false, false}
+	}{"INDIVIDUAL", []string{assetID}, true, true, false}
 	var link struct {
-		Key string `json:"key"`
+		Key           string `json:"key"`
+		AllowDownload bool   `json:"allowDownload"`
 	}
 	if err := c.call(ctx, http.MethodPost, "/api/shared-links", body, &link); err != nil {
 		return "", err
@@ -243,7 +245,17 @@ func (c *Client) CreateShareLink(ctx context.Context, assetID string) (string, e
 	if link.Key == "" {
 		return "", fmt.Errorf("immich POST /api/shared-links: response has no key")
 	}
+	// Without downloading, the link to the original would be dead.
+	if !link.AllowDownload {
+		return "", fmt.Errorf("immich POST /api/shared-links: Immich created the link without downloading allowed")
+	}
 	return link.Key, nil
+}
+
+// OriginalPath is the path of an asset's original file, which a Share Link's
+// key opens when the link allows downloading.
+func OriginalPath(assetID string) string {
+	return "/api/assets/" + url.PathEscape(assetID) + "/original"
 }
 
 // TranscodeHeader reads the header of a Ready Video's Transcode from its first
