@@ -48,15 +48,27 @@ type Message struct {
 	Text   string
 	// ParseMode is empty for plain text, or "HTML".
 	ParseMode string
+	// PreviewURL is the link Telegram previews. If empty, it previews the
+	// first link in Text.
+	PreviewURL string
+}
+
+// linkPreviewOptions are the Bot API's LinkPreviewOptions.
+type linkPreviewOptions struct {
+	URL string `json:"url"`
 }
 
 // SendMessage sends a text message.
 func (c *Client) SendMessage(ctx context.Context, m Message) error {
 	params := struct {
-		ChatID    string `json:"chat_id"`
-		Text      string `json:"text"`
-		ParseMode string `json:"parse_mode,omitempty"`
-	}{m.ChatID, m.Text, m.ParseMode}
+		ChatID             string              `json:"chat_id"`
+		Text               string              `json:"text"`
+		ParseMode          string              `json:"parse_mode,omitempty"`
+		LinkPreviewOptions *linkPreviewOptions `json:"link_preview_options,omitempty"`
+	}{ChatID: m.ChatID, Text: m.Text, ParseMode: m.ParseMode}
+	if m.PreviewURL != "" {
+		params.LinkPreviewOptions = &linkPreviewOptions{URL: m.PreviewURL}
+	}
 	return c.call(ctx, "sendMessage", params, nil)
 }
 

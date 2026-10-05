@@ -72,7 +72,7 @@ func TestReadyVideoIsPostedWithItsTranscode(t *testing.T) {
 	post := posts[0]
 	for k, want := range map[string]string{
 		"chat_id":            videoChannel,
-		"caption":            textPost("26 Sep 2026, 19:04", "26 Sep 2026, 17:05", 1),
+		"caption":            textPost("26 Sep 2026, 19:04", "26 Sep 2026, 17:05", "video-1", 1),
 		"parse_mode":         "HTML",
 		"supports_streaming": "true",
 	} {

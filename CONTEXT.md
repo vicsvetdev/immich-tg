@@ -52,11 +52,11 @@ When the Video was uploaded to Immich (its `createdAt`), shown in the service's 
 _Avoid_: created date, timestamp
 
 **Oversized Video**:
-A Video whose Transcode is too large for the bot to upload to Telegram (over 2 GB). At 1080p this means roughly a recording of 30+ minutes.
+A Video whose Transcode is too large for the bot to upload to Telegram (over 2 GB). How long a recording that is depends on Immich's maximum bitrate: over about 22 minutes at 12 Mbit/s. Without a maximum, 60 fps video can pass 2 GB in 6 minutes.
 _Avoid_: big video, large file
 
 **Share Link**:
-A public Immich link that lets anyone with the URL view that one Video in Immich, in original quality, without an Immich account.
+A public Immich link that lets anyone with the URL view that one Video in Immich, without an Immich account. Its page plays the Transcode; its key also opens the original, which a Post links to directly so that it plays in the browser. It shows metadata, because Immich allows downloading only then.
 _Avoid_: public link, Immich link, URL
 
 **Watch Start**:
