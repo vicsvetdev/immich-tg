@@ -8,6 +8,6 @@ Creating the link with metadata hidden and then allowing downloads with a `PATCH
 
 ## Consequences
 
-- Anyone with a Post's links can see where and with what the Video was recorded, both on the Share Link page and in the original file.
+- Anyone with a Post's link can see where and with what the Video was recorded, in the original file and on the Share Link page its key opens.
 - immich-tg checks the `allowDownload` Immich returns. A Share Link without downloading is a failed Share Link creation: a Problem Report and no Post, rather than a Post whose link is dead.
-- Whether the original plays in the browser depends on the browser: Pixel records HEVC, which Safari plays, and Chrome and Edge play with hardware decoding. Posts also link the Share Link page, which plays the Transcode anywhere.
+- Whether the original plays in the browser depends on the browser: Pixel records HEVC, which Safari plays, and Chrome and Edge play with hardware decoding. Posts have no fallback link: in a browser that can't decode HEVC, the original doesn't play.
