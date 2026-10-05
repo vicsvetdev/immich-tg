@@ -7,12 +7,12 @@ It is a small, stateless Go service that runs in Docker. It watches the uploads 
 - the Transcode as an inline, streamable Telegram video, with the right aspect ratio, duration and a preview thumbnail. Portrait videos play upright.
 - the **Recording Date**, labelled "Recorded": the local time where the video was recorded.
 - the **Upload Date**, labelled "Uploaded": when the video was uploaded to Immich, in immich-tg's time zone (`TZ`).
-- "Watch in original quality", which plays the original file in the browser, and "Open in Immich", the **Share Link** page, which plays the Transcode and offers the original for download. Viewers need no account and no password, and the links don't expire. The original plays in Safari, and in Chrome and Edge where the device can decode HEVC; elsewhere, use "Open in Immich".
-- **Both links show where the Video was recorded.** The Share Link shows metadata such as location, because Immich only allows downloading when it does, and the original file carries the location anyway ([ADR 0004](docs/adr/0004-share-links-show-metadata.md)).
+- "Watch in original quality", which plays the original file in the browser, through the Video's **Share Link**. Viewers need no account and no password, and the link doesn't expire. The original plays in Safari, and in Chrome and Edge where the device can decode HEVC.
+- **The link shows where the Video was recorded.** The Share Link shows metadata such as location, because Immich only allows downloading when it does, and the original file carries the location anyway ([ADR 0004](docs/adr/0004-share-links-show-metadata.md)).
 
 The original file is never uploaded to Telegram, only the Transcode.
 
-Sometimes a Video can't be posted as a video. This happens when the Video is an **Oversized Video**, meaning its Transcode is over 2 GB (2,000,000,000 bytes). It also happens when the Transcode never appears, or can't be read or uploaded. The Video then gets a **Link-only Post** instead: the Recording Date, the Upload Date, both links and a short note explaining why there is no player. Each such problem also produces a **Problem Report** in a private **Log Channel**, which only you, the operator, follow. The Log Channel also receives a message whenever immich-tg starts or stops.
+Sometimes a Video can't be posted as a video. This happens when the Video is an **Oversized Video**, meaning its Transcode is over 2 GB (2,000,000,000 bytes). It also happens when the Transcode never appears, or can't be read or uploaded. The Video then gets a **Link-only Post** instead: the Recording Date, the Upload Date, the link to the original and a short note explaining why there is no player. Each such problem also produces a **Problem Report** in a private **Log Channel**, which only you, the operator, follow. The Log Channel also receives a message whenever immich-tg starts or stops.
 
 Uploads go through a Telegram bot and a self-hosted [Telegram Bot API server](https://github.com/tdlib/telegram-bot-api) running in `--local` mode. The public Bot API accepts uploads only up to 50 MB; the local server raises that to 2000 MB. The Bot API server is a separate project, shared with other bots (see [ADR 0001](docs/adr/0001-bot-via-shared-local-bot-api-server.md)).
 
@@ -263,7 +263,7 @@ What each situation produces, and what to check:
 | Situation | Video Channel | Log Channel | What to check |
 |---|---|---|---|
 | Ready, upload succeeds | Post with the video | — | — |
-| Transcode over 2,000,000,000 bytes (Oversized Video) | Link-only Post: "video too large for Telegram" | Problem Report (`oversized`) | Check Immich's maximum bitrate ([step 5](#5-configure-immichs-video-transcoding)); at 12M this is a recording of about 22 minutes or more. Viewers can still watch it through the links. |
+| Transcode over 2,000,000,000 bytes (Oversized Video) | Link-only Post: "video too large for Telegram" | Problem Report (`oversized`) | Check Immich's maximum bitrate ([step 5](#5-configure-immichs-video-transcoding)); at 12M this is a recording of about 22 minutes or more. Viewers can still watch it through the link to the original. |
 | Waiting longer than `WAIT_TIMEOUT` | Link-only Post: "video not available in Telegram" | Problem Report (`no Transcode in time`) | Immich's transcoding settings ([step 5](#5-configure-immichs-video-transcoding)), Immich's job queue and logs, and whether `WAIT_TIMEOUT` is long enough. |
 | Transcode download fails (an error, a download that breaks off, or Immich sending nothing for 2 minutes) | Link-only Post: "video not available in Telegram" | Problem Report (`Transcode download failed`) | Immich's reachability and logs. |
 | The Transcode's header can't be read | Link-only Post: "video not available in Telegram" | Problem Report (`Transcode header unreadable`) | No `moov` box or video track was found in the first 1 MiB of what Immich served. Check Immich's transcoding settings and logs. |
@@ -297,7 +297,7 @@ The automated tests can't check this one: whether Telegram's players honour the 
    - the video plays **upright**, in a portrait frame, and streams without first downloading completely;
    - its thumbnail is upright;
    - the Recording Date and the Upload Date are right;
-   - "Watch in original quality" plays the original in the browser, and "Open in Immich" opens the Video in Immich.
+   - "Watch in original quality" plays the original in the browser.
 
 If the video plays sideways, find its `"msg":"posted"` log line. It shows the `width`, `height` and `rotation` that immich-tg read from the Transcode.
 

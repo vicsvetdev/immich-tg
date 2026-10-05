@@ -54,7 +54,7 @@ Uploads go through a bot and a separate, shared, self-hosted Telegram Bot API se
 18. As a viewer, I want portrait videos to play upright, so that I don't have to turn my phone.
 19. As a viewer, I want videos to stream while they download, so that long videos start playing quickly.
 20. As a viewer, I want each Post to show the Recording Date in the local time of the place of recording, so that I know when it happened.
-21. As a viewer, I want a "Watch in original quality" link in each Post, so that I can play the full-quality file in the browser, and an "Open in Immich" link to the Share Link page, which plays anywhere and offers the download.
+21. As a viewer, I want a "Watch in original quality" link in each Post, so that I can play the full-quality file in the browser.
 22. As a viewer, I want the Share Link to work without an Immich account, a password or an expiry, so that old Posts keep working.
 23. ~~As the operator, I want Share Links to hide metadata, so that viewers never see where a video was recorded.~~ Dropped: Immich forbids downloading from a link that hides metadata, and the original carries the location anyway ([ADR 0004](../../docs/adr/0004-share-links-show-metadata.md)).
 24. As the operator, I want Share Links to allow downloading, so that viewers can get the original quality.
@@ -243,13 +243,12 @@ Uploads go through a bot and a separate, shared, self-hosted Telegram Bot API se
   📅 Recorded: <Recording Date>
   ⬆️ Uploaded: <Upload Date>
   ▶️ <a href="<IMMICH_PUBLIC_URL>/api/assets/<id>/original?key=<key>">Watch in original quality</a>
-  🌐 <a href="<Share Link>">Open in Immich</a>
   ```
 - **Link-only Post:** `sendMessage` with the same caption plus a short reason note. There are two variants:
   - "video too large for Telegram", for Oversized Videos
   - "video not available in Telegram", for timeout, unreadable Transcode or upload failures
 
-  Link previews stay **enabled**, with `link_preview_options` `{"url": "<Share Link>"}`, so that Telegram shows the Share Link page's preview card rather than one for the original file, the first link.
+  Link previews stay **enabled**, which is the Telegram default, so no `link_preview_options` are sent. Telegram previews the link to the original.
 
 ### Outcomes per Video
 

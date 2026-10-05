@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net/http"
 	"reflect"
-	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -25,21 +24,14 @@ func after(d time.Duration) time.Time { return watchStart.Add(d) }
 // textPost is the caption of the Post for the Video with the given id,
 // Recording Date and Upload Date, and the n-th Share Link created.
 func textPost(recordingDate, uploadDate, id string, n int) string {
-	return fmt.Sprintf("📅 Recorded: %s\n⬆️ Uploaded: %s\n▶️ <a href=\"%s/api/assets/%s/original?key=%s\">Watch in original quality</a>\n🌐 <a href=\"%s\">Open in Immich</a>",
-		recordingDate, uploadDate, publicURL, id, fakeimmich.ShareLinkKey(n), sharePage(n))
+	return fmt.Sprintf("📅 Recorded: %s\n⬆️ Uploaded: %s\n▶️ <a href=\"%s/api/assets/%s/original?key=%s\">Watch in original quality</a>",
+		recordingDate, uploadDate, publicURL, id, fakeimmich.ShareLinkKey(n))
 }
-
-// sharePage is the URL of the n-th Share Link's page.
-func sharePage(n int) string { return publicURL + "/share/" + fakeimmich.ShareLinkKey(n) }
-
-// sharePageLink finds the Share Link page's link in a Post's caption.
-var sharePageLink = regexp.MustCompile(`<a href="([^"]*/share/[^"]*)">`)
 
 // posts returns the captions of the Posts published to the Video Channel:
 // the caption of each video Post and the text of each text message, leaving
-// out the calls Telegram rejected. It checks that each is in HTML parse mode,
-// and that each text message keeps link previews enabled, previewing its
-// Share Link page.
+// out the calls Telegram rejected. It checks that each is in HTML parse mode
+// and keeps link previews enabled.
 func (h *harness) posts() []string {
 	h.t.Helper()
 	var captions []string
@@ -47,21 +39,13 @@ func (h *harness) posts() []string {
 		if c.Fields["parse_mode"] != "HTML" {
 			h.t.Errorf("Video Channel call %s with parse_mode %q, want HTML", c.Method, c.Fields["parse_mode"])
 		}
+		if _, ok := c.Fields["link_preview_options"]; ok {
+			h.t.Errorf("Post disables link previews: %q", c.Fields["link_preview_options"])
+		}
 		switch c.Method {
 		case "sendVideo":
-			if opts, ok := c.Fields["link_preview_options"]; ok {
-				h.t.Errorf("video Post has link_preview_options %q, want none", opts)
-			}
 			captions = append(captions, c.Fields["caption"])
 		case "sendMessage":
-			var page string
-			if m := sharePageLink.FindStringSubmatch(c.Fields["text"]); m != nil {
-				page = m[1]
-			}
-			want, _ := json.Marshal(map[string]string{"url": page})
-			if got := c.Fields["link_preview_options"]; got != string(want) {
-				h.t.Errorf("Link-only Post has link_preview_options %q, want %s", got, want)
-			}
 			captions = append(captions, c.Fields["text"])
 		default:
 			h.t.Errorf("Video Channel call %s, want sendVideo or sendMessage", c.Method)
