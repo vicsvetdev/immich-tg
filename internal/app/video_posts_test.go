@@ -124,6 +124,40 @@ func TestPortraitVideosAreSentUpright(t *testing.T) {
 	assertVideo(t, posts[2], "landscape", 1920, 1080, 1, fakeimmich.LandscapeMP4)
 }
 
+func TestRotatedTranscodeIsPostedWithAProblemReport(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.immich.AddAsset(failureVideo(fakeimmich.Asset{Transcode: fakeimmich.Rotated90MP4}))
+
+	h.start()
+	h.poll()
+
+	// Telegram for iPhone ignores the matrix, but other apps play it upright.
+	posts := h.videoPosts()
+	if len(posts) != 1 {
+		t.Fatalf("got %d Video Channel calls, want 1 video Post", len(posts))
+	}
+	assertVideo(t, posts[0], "video-1", 1080, 1920, 1, fakeimmich.Rotated90MP4)
+	h.assertProblemReport("rotated Transcode", "90°", "iPhone", "hardware decoding")
+}
+
+func TestUprightTranscodesGetNoProblemReport(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.immich.AddAsset(fakeimmich.Asset{ID: "portrait", CreatedAt: after(time.Second), Transcoded: true, Transcode: fakeimmich.PortraitMP4, Duration: time.Second})
+	h.immich.AddAsset(fakeimmich.Asset{ID: "landscape", CreatedAt: after(2 * time.Second), Transcoded: true, Transcode: fakeimmich.LandscapeMP4, Duration: time.Second})
+
+	h.start()
+	h.poll()
+
+	if posts := h.videoPosts(); len(posts) != 2 {
+		t.Fatalf("got %d Video Channel calls, want 2 video Posts", len(posts))
+	}
+	if texts := h.logChannelTexts(); len(texts) != 0 {
+		t.Errorf("Log Channel got %q, want no Problem Report", texts)
+	}
+}
+
 func TestDurationIsRoundedToWholeSeconds(t *testing.T) {
 	t.Parallel()
 	h := newHarness(t)

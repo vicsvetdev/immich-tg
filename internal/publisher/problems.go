@@ -20,6 +20,7 @@ const (
 	kindUnreadable problemKind = "Transcode header unreadable"
 	kindUpload     problemKind = "upload failed"
 	kindShareLink  problemKind = "Share Link creation failed"
+	kindRotated    problemKind = "rotated Transcode"
 )
 
 // linkOnlyNote ends a Link-only Post's caption, saying why it has no video.
@@ -62,6 +63,19 @@ func (p *Publisher) TimedOut(ctx context.Context, v immich.Asset, waitTimeout ti
 		prob.err = fmt.Errorf("%w; no Link-only Post, could not create the Share Link: %w", prob.err, err)
 	}
 	p.publishOutcome(ctx, v, link, prob)
+}
+
+// reportRotated handles a Video posted with a Transcode whose frames are
+// stored turned, with a matrix in its header to show them upright. Telegram
+// for iPhone ignores the matrix and stretches the frames as stored to the
+// Post's dimensions. The Post plays upright in the other apps, so it stays,
+// and only a Problem Report goes out, even once shutdown has begun.
+func (p *Publisher) reportRotated(ctx context.Context, v immich.Asset, rotation int) {
+	ctx, cancel := shutdown.Outlive(ctx)
+	defer cancel()
+	p.report(ctx, v, problem{kindRotated, fmt.Errorf(
+		"the Transcode's frames are stored turned, with a %d° rotation in its MP4 header that Telegram for iPhone ignores, so the Post plays sideways or upside down there; "+
+			"turn off hardware decoding in Immich's Video Transcoding settings, so that Immich turns the frames themselves", rotation)})
 }
 
 // fail handles a Video that could not be posted as intended. A failure caused
