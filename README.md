@@ -190,7 +190,7 @@ Now upload a video to Immich. Within about `POLL_INTERVAL` it is logged as `New 
 
 - **Stop:** `docker compose down`, or `docker compose stop`, sends SIGTERM. immich-tg stops polling and either finishes or abandons the Video in progress. A Video is abandoned only when the shutdown itself interrupts it, for example in the middle of its upload or a rate-limit wait. It gets no Post and no Problem Report, and it is logged as `Video abandoned on shutdown`. A Video that fails for any other reason still gets its Link-only Post and Problem Report, even if the failure comes after the stop began, as long as Telegram takes them within 5 seconds. immich-tg then publishes `🔴 immich-tg stopped` to the Log Channel and exits 0.
 - **Crash:** if immich-tg crashes, Docker restarts it and you get a new started message **without** a stopped message before it. That's how you tell crashes from planned stops. Remember that Videos uploaded between the stop and the next start are never posted.
-- **Update:** `git pull && docker compose up -d --build`.
+- **Update:** `git pull && docker compose up -d --build`. The author's homelab does this automatically for every merge to `main` (see [Continuous delivery](#continuous-delivery)).
 - **Change configuration:** edit `.env`, then run `docker compose up -d` to recreate the container.
 
 ## Troubleshooting
@@ -305,3 +305,22 @@ go test ./...
 ```
 
 The tests drive the whole service against a fake Immich and a fake Telegram Bot API, with no real time passing. See `internal/fakeimmich` and `internal/faketelegram`.
+
+Every PR to `main` runs the `check` job in `.github/workflows/ci.yml`: gofmt, `go vet`, `go test -race` and `docker build`.
+
+### Continuous delivery
+
+Every push to `main`, which includes every merged PR, deploys to the author's homelab once `check` passes. So does a manual run of the CI workflow on `main` (Actions → CI → Run workflow), which redeploys without a new commit.
+
+```text
+deploy (GitHub-hosted runner)
+  join the tailnet as tag:ci      Tailscale federated identity, accepted only from main
+  ssh to the homelab              deploy key whose forced command is the deploy script
+    git pull --ff-only
+    docker compose up -d --build  builds first, then replaces the container
+    wait for "msg":"started"      the job fails if it doesn't appear within 90s
+```
+
+A deploy that changes the image restarts immich-tg. Videos uploaded during the restart, about 15 seconds, are never posted.
+
+The homelab side (the deploy script, the key's `authorized_keys` line, the Tailscale access policy) is set up outside this repo. The workflow needs these repository secrets: `TS_OAUTH_CLIENT_ID`, `TS_AUDIENCE`, `DEPLOY_SSH_KEY` and `DEPLOY_KNOWN_HOSTS`. Forks skip the deploy job.
