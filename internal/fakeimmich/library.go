@@ -64,7 +64,10 @@ type library struct {
 	// shareLinkFailure, if non-zero, is the status Share Link creation fails
 	// with.
 	shareLinkFailure int
-	shareLinks       int
+	// noShareLinkDownloads makes Immich create Share Links that never allow
+	// downloading.
+	noShareLinkDownloads bool
+	shareLinks           int
 }
 
 // maxPageSize is Immich's maximum search page size.
@@ -134,6 +137,14 @@ func (s *Server) FailShareLinks(status int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.lib.shareLinkFailure = status
+}
+
+// ForbidShareLinkDownloads makes Immich create Share Links that never allow
+// downloading, whatever is asked.
+func (s *Server) ForbidShareLinkDownloads() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.lib.noShareLinkDownloads = true
 }
 
 // ShareLinkKey is the key of the n-th Share Link created, counting from 1.
@@ -292,11 +303,17 @@ func (s *Server) createSharedLink(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
+	// Like Immich, a link that hides metadata never allows downloading, and
+	// both default to true.
+	showMetadata := req.ShowMetadata == nil || *req.ShowMetadata
+	allowDownload := showMetadata && (req.AllowDownload == nil || *req.AllowDownload) && !s.lib.noShareLinkDownloads
 	s.lib.shareLinks++
 	writeJSON(w, http.StatusCreated, map[string]any{
-		"id":   fmt.Sprintf("link-%d", s.lib.shareLinks),
-		"key":  ShareLinkKey(s.lib.shareLinks),
-		"type": req.Type,
+		"id":            fmt.Sprintf("link-%d", s.lib.shareLinks),
+		"key":           ShareLinkKey(s.lib.shareLinks),
+		"type":          req.Type,
+		"allowDownload": allowDownload,
+		"showMetadata":  showMetadata,
 	})
 }
 
