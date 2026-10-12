@@ -5,6 +5,8 @@ on:
     branches: [main]
   push:
     branches: [main]
+  # Redeploy without a new commit: Actions → CI → Run workflow on main.
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -44,3 +46,39 @@ jobs:
       # The same image the homelab builds with docker compose.
       - name: docker build
         run: docker build .
+
+  # Deploys main to the homelab: joins the tailnet, then runs the deploy script over SSH.
+  # The homelab side (deploy script, the key's forced command, Tailscale policy) is set up
+  # outside this repo, so forks skip this job.
+  deploy:
+    needs: check
+    if: github.repository == 'vicsvetdev/immich-tg' && github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # GitHub's OIDC token, which Tailscale's federated identity accepts only from main.
+      id-token: write
+    env:
+      HOMELAB: 100.100.149.115
+    steps:
+      - name: Join the tailnet
+        uses: tailscale/github-action@v4
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          audience: ${{ secrets.TS_AUDIENCE }}
+          tags: tag:ci
+          ping: ${{ env.HOMELAB }}
+
+      - name: Deploy
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          # The key's forced command runs the deploy script; "deploy" is the only action that changes anything.
+          ssh -i ~/.ssh/deploy_key -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+            -o ConnectTimeout=30 -o ServerAliveInterval=30 \
+            "vicsvetdev@$HOMELAB" deploy
