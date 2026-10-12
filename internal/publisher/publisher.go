@@ -117,6 +117,9 @@ func (p *Publisher) postVideo(ctx context.Context, v immich.Asset, originalLink 
 		"rotation", header.Rotation,
 		"duration", post.Duration,
 	)
+	if header.Rotation != 0 {
+		p.reportRotated(ctx, v, header.Rotation)
+	}
 	return nil
 }
 

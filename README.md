@@ -108,14 +108,16 @@ immich-tg only ever uploads Immich's Transcode, so Immich has to make one for **
 | Video codec | **H.264** |
 | Audio codec | **AAC** (the default) |
 | Maximum bitrate | e.g. **12M** (12 Mbit/s) |
+| Hardware decoding | **Off** |
 
-Any **hardware acceleration** setting works, including Quick Sync with hardware decoding. immich-tg reads each Transcode's orientation from the file itself, so portrait videos come out upright either way.
+Any **hardware acceleration** API works for encoding, including Quick Sync, but **hardware decoding** must be off. With it on, Immich keeps a portrait Video's frames sideways, as stored, and adds a rotation to the Transcode's MP4 header. Telegram for Android and desktop apply that rotation. Telegram for iPhone ignores it and shows the video sideways, stretched to fit the portrait frame. With hardware decoding off, Immich rotates the frames themselves, so the video plays upright everywhere.
 
 immich-tg can't check these settings, because that would need admin permissions. **If they are wrong, nothing fails at startup.** Instead:
 
 - If the policy isn't "All videos", Immich skips transcoding some Videos, and those Videos never become Ready. After `WAIT_TIMEOUT` (default 2 hours), each one gets a Link-only Post saying "video not available in Telegram", plus a "no Transcode in time" Problem Report.
 - With another codec or resolution, the Transcode may be too large or may not play inline in Telegram.
 - Without a maximum bitrate, the Transcode can be far larger than the original: a 6-minute 60 fps HEVC video from a Pixel came out at 50 Mbit/s, over 2 GB. At 12M, a Video fits in Telegram up to about 22 minutes. A number without a unit is in kbit/s, so enter `12M` or `12000`, not `12`.
+- With hardware decoding on, portrait Videos play sideways in Telegram for iPhone. Each such Video is still posted, and it also gets a "rotated Transcode" Problem Report.
 
 Only New Videos matter, so you don't need to transcode your existing library. If you do start a transcoding job for the whole library, New Videos wait in the queue behind it and may hit `WAIT_TIMEOUT`.
 
@@ -254,7 +256,7 @@ The same information is logged to stdout as `"msg":"Problem Report"`. To list al
 docker compose logs immich-tg | grep '"msg":"Problem Report"'
 ```
 
-The kind on the first line is one of `oversized`, `no Transcode in time`, `Transcode download failed`, `Transcode header unreadable`, `upload failed` or `Share Link creation failed`.
+The kind on the first line is one of `oversized`, `no Transcode in time`, `Transcode download failed`, `Transcode header unreadable`, `upload failed`, `Share Link creation failed` or `rotated Transcode`.
 
 An upload has no overall time limit, because 2 GB can take a while. Instead, it is abandoned once no data has moved for 2 minutes, and the Reason line says which side stalled: Immich (`Transcode download failed`) or the Bot API server (`upload failed`). Once the whole file is sent, immich-tg waits up to 1 hour for the Bot API server to answer, which leaves it time to pass a large file on to Telegram.
 
@@ -263,6 +265,7 @@ What each situation produces, and what to check:
 | Situation | Video Channel | Log Channel | What to check |
 |---|---|---|---|
 | Ready, upload succeeds | Post with the video | — | — |
+| Ready, upload succeeds, but the Transcode stores its frames turned, with a rotation in its header | Post with the video, sideways in Telegram for iPhone | Problem Report (`rotated Transcode`) | Turn off hardware decoding in Immich ([step 5](#5-configure-immichs-video-transcoding)). The Post stays as it is; New Videos after the change play upright. |
 | Transcode over 2,000,000,000 bytes (Oversized Video) | Link-only Post: "video too large for Telegram" | Problem Report (`oversized`) | Check Immich's maximum bitrate ([step 5](#5-configure-immichs-video-transcoding)); at 12M this is a recording of about 22 minutes or more. Viewers can still watch it through the link to the original. |
 | Waiting longer than `WAIT_TIMEOUT` | Link-only Post: "video not available in Telegram" | Problem Report (`no Transcode in time`) | Immich's transcoding settings ([step 5](#5-configure-immichs-video-transcoding)), Immich's job queue and logs, and whether `WAIT_TIMEOUT` is long enough. |
 | Transcode download fails (an error, a download that breaks off, or Immich sending nothing for 2 minutes) | Link-only Post: "video not available in Telegram" | Problem Report (`Transcode download failed`) | Immich's reachability and logs. |
@@ -289,17 +292,17 @@ Some things are not reported, by design:
 
 ## Manual acceptance check
 
-The automated tests can't check this one: whether Telegram's players honour the Transcode's rotation. Check it once after setup, and again after changing Immich's hardware acceleration:
+The automated tests can't check this one: whether Telegram's players show the Transcode upright. Check it once after setup, and again after changing Immich's hardware acceleration:
 
-1. With Immich's hardware acceleration set to **Quick Sync** with hardware decoding, record a short **portrait** video on a Pixel phone and let it back up to Immich. Quick Sync stores portrait video as landscape frames plus a rotation, which is the case to check. If you use a different acceleration setting, test with that one too.
-2. Wait for its Post in the Video Channel.
-3. Open the Post in the **Telegram app on a phone**. Check that:
-   - the video plays **upright**, in a portrait frame, and streams without first downloading completely;
+1. With Immich's transcoding set up as in [step 5](#5-configure-immichs-video-transcoding), record a short **portrait** video on a phone and let it back up to Immich.
+2. Wait for its Post in the Video Channel. Its `"msg":"posted"` log line should show `"rotation":0`, and the Log Channel should get no Problem Report.
+3. Open the Post in the **Telegram app on an iPhone** and on an **Android phone**. The iPhone app is the one that ignores a rotation in the header. In both apps, check that:
+   - the video plays **upright**, in a portrait frame, and streams without first downloading completely, both inline in the chat and full screen;
    - its thumbnail is upright;
    - the Recording Date and the Upload Date are right;
    - "Watch in original quality" plays the original in the browser.
 
-If the video plays sideways, find its `"msg":"posted"` log line. It shows the `width`, `height` and `rotation` that immich-tg read from the Transcode.
+If the video plays sideways on the iPhone, look for a `rotated Transcode` Problem Report, and check that hardware decoding is off. The `"msg":"posted"` log line shows the `width`, `height` and `rotation` that immich-tg read from the Transcode.
 
 ## Development
 
