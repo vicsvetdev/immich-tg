@@ -17,8 +17,16 @@ import (
 	"immich-tg/internal/thumbnail"
 )
 
-// dateLayout formats the Recording Date and Upload Date in captions.
+// dateLayout formats the Recording Date and Upload Date in logs and Problem
+// Reports.
 const dateLayout = "02 Jan 2006, 15:04"
+
+// captionDateLayout formats them in captions. Telegram clients turn text that
+// looks like a timecode (e.g. "06:48") in a video's caption into a link that
+// seeks to that moment, if the video is that long. They only do so when the
+// time stands on its own, after whitespace or punctuation, so an invisible
+// WORD JOINER (U+2060) before the time stops them.
+const captionDateLayout = "02 Jan 2006, \u206015:04"
 
 // Publisher publishes Posts.
 type Publisher struct {
@@ -34,7 +42,8 @@ type Publisher struct {
 // New returns a Publisher that posts to videoChannelID and reports problems to
 // logChannelID. Share Links and the links to assets in Problem Reports point
 // to publicURL, Immich's public address without a trailing slash. Upload Dates
-// are shown in location.
+// are shown in location, and so are Recording Dates whose time zone Immich
+// does not know.
 func New(immichClient *immich.Client, tg *telegram.Client, publicURL, videoChannelID, logChannelID string, location *time.Location, log *slog.Logger) *Publisher {
 	return &Publisher{
 		immich:         immichClient,
@@ -111,7 +120,7 @@ func (p *Publisher) postVideo(ctx context.Context, v immich.Asset, originalLink 
 	}
 	p.log.Info("posted",
 		"asset_id", v.ID,
-		"recording_date", formatRecordingDate(v.LocalDateTime),
+		"recording_date", p.recordingDate(v, dateLayout),
 		"width", post.Width,
 		"height", post.Height,
 		"rotation", header.Rotation,
@@ -167,12 +176,19 @@ func (p *Publisher) thumbnail(ctx context.Context, assetID string, log *slog.Log
 // caption is a Post's caption in Telegram's HTML parse mode.
 func (p *Publisher) caption(v immich.Asset, originalLink string) string {
 	return fmt.Sprintf("📅 Recorded: %s\n⬆️ Uploaded: %s\n▶️ <a href=\"%s\">Watch in original quality</a>",
-		formatRecordingDate(v.LocalDateTime), v.CreatedAt.In(p.location).Format(dateLayout), html.EscapeString(originalLink))
+		p.recordingDate(v, captionDateLayout), v.CreatedAt.In(p.location).Format(captionDateLayout), html.EscapeString(originalLink))
 }
 
-// formatRecordingDate formats Immich's localDateTime. It holds the wall-clock
-// time at the place of recording in its UTC fields, so it is formatted as-is,
-// with no time zone conversion.
-func formatRecordingDate(localDateTime time.Time) string {
-	return localDateTime.UTC().Format(dateLayout)
+// recordingDate formats the Video's Recording Date with layout. Immich's
+// localDateTime holds the wall-clock time at the place of recording in its UTC
+// fields, so it is formatted as-is, with no time zone conversion. But when Immich does not
+// know the recording's time zone (e.g. a video with its metadata stripped),
+// localDateTime is just the UTC instant, the same as fileCreatedAt; the best
+// guess then is the service's time zone, as for the Upload Date. A recording
+// made where the offset really is zero is shown in that time zone too.
+func (p *Publisher) recordingDate(v immich.Asset, layout string) string {
+	if v.LocalDateTime.Equal(v.FileCreatedAt) {
+		return v.FileCreatedAt.In(p.location).Format(layout)
+	}
+	return v.LocalDateTime.UTC().Format(layout)
 }

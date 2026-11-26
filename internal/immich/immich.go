@@ -54,8 +54,12 @@ type Asset struct {
 	// CreatedAt is when the asset was uploaded, by Immich's clock.
 	CreatedAt time.Time `json:"createdAt"`
 	// LocalDateTime is the Recording Date: the wall-clock time at the place of
-	// recording, serialised as if it were UTC.
-	LocalDateTime    time.Time `json:"localDateTime"`
+	// recording, serialised as if it were UTC. When Immich does not know the
+	// time zone of the recording, it is the UTC instant, equal to
+	// FileCreatedAt.
+	LocalDateTime time.Time `json:"localDateTime"`
+	// FileCreatedAt is the instant of recording.
+	FileCreatedAt    time.Time `json:"fileCreatedAt"`
 	OriginalFileName string    `json:"originalFileName"`
 	Duration         Duration  `json:"duration"`
 }
