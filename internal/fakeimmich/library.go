@@ -26,7 +26,11 @@ type Asset struct {
 	CreatedAt time.Time
 	// LocalDateTime is the Recording Date, served with a Z suffix like Immich
 	// does. Default: CreatedAt.
-	LocalDateTime    time.Time
+	LocalDateTime time.Time
+	// FileCreatedAt is the instant of recording. Equal to LocalDateTime, it
+	// means Immich does not know the time zone of the recording.
+	// Default: CreatedAt.
+	FileCreatedAt    time.Time
 	OriginalFileName string
 	Trashed          bool
 	// Transcoded is set once the asset has a Transcode (Immich's isEncoded).
@@ -94,6 +98,9 @@ func (s *Server) AddAsset(a Asset) {
 	}
 	if a.LocalDateTime.IsZero() {
 		a.LocalDateTime = a.CreatedAt
+	}
+	if a.FileCreatedAt.IsZero() {
+		a.FileCreatedAt = a.CreatedAt
 	}
 	if a.OriginalFileName == "" {
 		a.OriginalFileName = "PXL_" + a.ID + ".mp4"
@@ -266,6 +273,7 @@ func assetJSON(a Asset) map[string]any {
 		"isTrashed":        a.Trashed,
 		"createdAt":        a.CreatedAt.UTC().Format(time.RFC3339Nano),
 		"localDateTime":    a.LocalDateTime.UTC().Format(time.RFC3339Nano),
+		"fileCreatedAt":    a.FileCreatedAt.UTC().Format(time.RFC3339Nano),
 		"originalFileName": a.OriginalFileName,
 		"duration":         a.Duration.Milliseconds(),
 	}

@@ -44,7 +44,7 @@ _Avoid_: message, notification
 A Post without the video file: Recording Date, Upload Date, Share Link and a short note why. Used for Oversized Videos and whenever the Transcode could not be obtained or uploaded.
 
 **Recording Date**:
-When the Video was captured, as wall-clock time at the place of recording. Not the upload time.
+When the Video was captured, as wall-clock time at the place of recording. Not the upload time. When Immich does not know the time zone of the recording (its `localDateTime` equals `fileCreatedAt`), it is shown in the service's time zone (`TZ`) instead.
 _Avoid_: upload date, created date, timestamp
 
 **Upload Date**:

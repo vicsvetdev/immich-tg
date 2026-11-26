@@ -115,7 +115,7 @@ func (p *Publisher) publishLinkOnly(ctx context.Context, v immich.Asset, origina
 	if err := p.telegram.SendMessage(ctx, post); err != nil {
 		return err
 	}
-	p.log.Info("posted Link-only", "asset_id", v.ID, "recording_date", formatRecordingDate(v.LocalDateTime), "note", note)
+	p.log.Info("posted Link-only", "asset_id", v.ID, "recording_date", p.recordingDate(v, dateLayout), "note", note)
 	return nil
 }
 
@@ -123,7 +123,7 @@ func (p *Publisher) publishLinkOnly(ctx context.Context, v immich.Asset, origina
 // logs the same information to stdout, so that it is not lost when Telegram
 // cannot be reached.
 func (p *Publisher) report(ctx context.Context, v immich.Asset, prob problem) {
-	recordingDate := formatRecordingDate(v.LocalDateTime)
+	recordingDate := p.recordingDate(v, dateLayout)
 	// The link to the asset in Immich, for the operator; not a Share Link.
 	assetLink := p.publicURL + "/photos/" + v.ID
 	p.log.Error("Problem Report",

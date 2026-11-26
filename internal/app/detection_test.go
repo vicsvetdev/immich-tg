@@ -22,10 +22,21 @@ var watchStart = time.Date(2026, 9, 26, 17, 4, 5, 0, time.UTC)
 func after(d time.Duration) time.Time { return watchStart.Add(d) }
 
 // textPost is the caption of the Post for the Video with the given id,
-// Recording Date and Upload Date, and the n-th Share Link created.
+// Recording Date and Upload Date, and the n-th Share Link created. The dates
+// are given as "02 Jan 2006, 15:04".
 func textPost(recordingDate, uploadDate, id string, n int) string {
 	return fmt.Sprintf("📅 Recorded: %s\n⬆️ Uploaded: %s\n▶️ <a href=\"%s/api/assets/%s/original?key=%s\">Watch in original quality</a>",
-		recordingDate, uploadDate, publicURL, id, fakeimmich.ShareLinkKey(n))
+		captionDate(recordingDate), captionDate(uploadDate), publicURL, id, fakeimmich.ShareLinkKey(n))
+}
+
+// captionDate is date as a caption shows it: with a WORD JOINER right before
+// the time, so that Telegram does not make a timecode link of it.
+func captionDate(date string) string {
+	day, clock, ok := strings.Cut(date, ", ")
+	if !ok {
+		panic("date without a time: " + date)
+	}
+	return day + ", \u2060" + clock
 }
 
 // posts returns the captions of the Posts published to the Video Channel:
@@ -342,6 +353,27 @@ func TestUploadDateIsShownInTheServiceTimeZone(t *testing.T) {
 	// The Upload Date crosses midnight in the service's time zone; the
 	// Recording Date is not converted.
 	assertPosts(t, h.posts(), textPost("26 Sep 2026, 19:04", "27 Sep 2026, 03:05", "video", 1))
+}
+
+func TestRecordingDateWithoutTimeZoneIsShownInTheServiceTimeZone(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.location = time.FixedZone("UTC+2", 2*60*60)
+	// Immich does not know the recording's time zone, so its localDateTime is
+	// the UTC instant, the same as fileCreatedAt.
+	recorded := time.Date(2026, 11, 26, 6, 48, 39, 0, time.UTC)
+	h.immich.AddAsset(fakeimmich.Asset{
+		ID:            "video",
+		CreatedAt:     time.Date(2026, 11, 26, 7, 49, 49, 0, time.UTC),
+		LocalDateTime: recorded,
+		FileCreatedAt: recorded,
+		Transcoded:    true,
+	})
+
+	h.start()
+	h.poll()
+
+	assertPosts(t, h.posts(), textPost("26 Nov 2026, 08:48", "26 Nov 2026, 09:49", "video", 1))
 }
 
 func TestBurstIsPostedInUploadOrder(t *testing.T) {
